@@ -47,7 +47,7 @@ jobs:
               run: cargo clippy
             - name: Cargo build
               shell: bash -l {0}
-              run: cargo build --features conpty --features winpty
+              run: cargo build -v --features conpty --features winpty
             - name: Cargo test
               shell: pwsh
               run: cargo test --features conpty --features winpty
