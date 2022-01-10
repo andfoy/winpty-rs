@@ -1,7 +1,7 @@
 #![cfg(feature="conpty")]
 
 use std::ffi::OsString;
-use std::{thread, time};
+use std::{thread, time, env};
 use regex::Regex;
 
 use winptyrs::{PTY, PTYArgs, PTYBackend, MouseMode, AgentConfig};
@@ -79,6 +79,10 @@ fn read_write_conpty() {
 
 #[test]
 fn set_size_conpty() {
+    if env::var("CI").unwrap_or("0") == "1" {
+        return;
+    }
+
     let pty_args = PTYArgs {
         cols: 80,
         rows: 25,
