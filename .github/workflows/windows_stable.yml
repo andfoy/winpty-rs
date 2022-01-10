@@ -72,6 +72,15 @@ jobs:
               run: |
                 grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
                 ls
+            - name: Upload coverage results
+              uses: codecov/codecov-action@v2
+              with:
+                token: ${{ secrets.CODECOV_TOKEN }} # not required for public repos
+                files: ./lcov.info # optional
+                flags: unittests # optional
+                verbose: true # optional (default = false)
+                # fail_ci_if_error: true # optional (default = false)
+                # name: codecov-umbrella # optional
             # Enable this to get RDP access to the worker.
             # - name: Download
             #   if: ${{ failure() }}
