@@ -1,4 +1,5 @@
 
+use std::ffi::OsString;
 use crate::pty::{PTYArgs, PTYImpl};
 
 pub struct WinPTY {}

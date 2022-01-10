@@ -2,8 +2,7 @@
 use std::ffi::OsString;
 
 // Default implementation if winpty is not available
-use super::PTYArgs;
-use super::base::PTYImpl;
+use crate::pty::{PTYArgs, PTYImpl};
 
 pub struct ConPTY {}
 
