@@ -58,6 +58,10 @@ fn command_output(cmd: &mut Command) -> String {
 }
 
 fn main() {
+    if let Ok(_) = std::env::var("DOCS_RS") {
+        return;
+    }
+
     // println!("cargo:rerun-if-changed=src/lib.rs");
     // println!("cargo:rerun-if-changed=src/native.rs");
     // println!("cargo:rerun-if-changed=src/csrc");
