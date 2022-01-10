@@ -69,7 +69,9 @@ jobs:
             - name: Gather test coverage
               if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
               shell: bash -l {0}
-              run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
+              run: |
+                grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
+                ls
             # Enable this to get RDP access to the worker.
             # - name: Download
             #   if: ${{ failure() }}
