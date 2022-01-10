@@ -1,5 +1,11 @@
 # WinPTY-rs
 
+![Crates.io](https://img.shields.io/crates/v/winpty-rs?style=flat-square)
+![Crates.io (recent)](https://img.shields.io/crates/dr/winpty-rs)
+![docs.rs](https://img.shields.io/docsrs/winpty-rs)
+
+## Overview
+
 Create and spawn processes inside a pseudoterminal in Windows.
 
 This crate provides an abstraction over different backend implementations to spawn PTY processes in Windows.
@@ -90,7 +96,7 @@ let exit_status = pty.get_exitstatus().unwrap();
 
 ## Examples
 Please checkout the examples provided under the [examples](src/examples) folder, we provide examples for both
-ConPTY and WinPTY. In order to compile these examples, you can enable the `conpty_example` and `winpty-example`
+ConPTY and WinPTY. In order to compile these examples, you can enable the `conpty_example` and `winpty_example`
 features when calling `cargo build`
 
 ## Changelog
