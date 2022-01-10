@@ -79,7 +79,7 @@ fn read_write_conpty() {
 
 #[test]
 fn set_size_conpty() {
-    if env::var("CI").unwrap_or("0") == "1" {
+    if &env::var("CI").unwrap_or("0".to_owned()) == "1" {
         return;
     }
 
