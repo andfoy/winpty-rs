@@ -3,6 +3,7 @@
 ![Crates.io](https://img.shields.io/crates/v/winpty-rs?style=flat-square)
 ![Crates.io (recent)](https://img.shields.io/crates/dr/winpty-rs)
 ![docs.rs](https://img.shields.io/docsrs/winpty-rs)
+[![Library tests](https://github.com/andfoy/winpty-rs/actions/workflows/windows_stable.yml/badge.svg)](https://github.com/andfoy/winpty-rs/actions/workflows/windows_stable.yml)
 
 ## Overview
 
