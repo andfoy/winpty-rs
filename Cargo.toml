@@ -1,8 +1,14 @@
 [package]
 name = "winpty-rs"
-version = "0.1.0"
+version = "0.1.0-dev"
 edition = "2021"
 links = "winpty"
+license = "MIT OR Apache-2.0"
+description = "Create and spawn processes inside a pseudoterminal in Windows"
+homepage = "https://github.com/andfoy/winpty-rs"
+readme = "README.md"
+repository = "https://github.com/andfoy/winpty-rs"
+keywords = ["windows", "pty", "winpty", "conpty", "pseudoterminal"]
 
 [dependencies]
 enum-primitive-derive = "0.2.2"
