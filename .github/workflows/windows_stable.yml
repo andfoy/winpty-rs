@@ -42,7 +42,7 @@ jobs:
               shell: bash -l {0}
               run: conda install -y winpty
             - name: Cargo lint
-              if: ${{ matrix.RUST_TOOLCHAIN == "stable" }}
+              if: ${{ matrix.RUST_TOOLCHAIN == 'stable' }}
               shell: bash -l {0}
               run: cargo clippy
             - name: Cargo build
