@@ -1,0 +1,78 @@
+name: Library tests
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
+jobs:
+    windows:
+        name: Rust ${{ matrix.RUST_TOOLCHAIN }}
+        runs-on: windows-latest
+        env:
+            RUST_TOOLCHAIN: ${{ matrix.RUST_TOOLCHAIN }}
+            RUNNER_OS: "windows"
+        strategy:
+            fail-fast: false
+            matrix:
+                RUST_TOOLCHAIN: ["stable", "nightly",]
+        steps:
+            - name: Checkout branch
+              uses: actions/checkout@v2
+            - name: Install latest Rust ${{ matrix.RUST_TOOLCHAIN }}
+              uses: actions-rs/toolchain@v1
+              with:
+                toolchain: ${{ matrix.RUST_TOOLCHAIN }}
+                target: x86_64-pc-windows-msvc
+                override: true
+                components: rustfmt, clippy
+            - name: Install miniconda
+              uses: conda-incubator/setup-miniconda@v2
+              with:
+                auto-update-conda: true
+                activate-environment: test
+                channels: conda-forge,defaults
+                python-version: 3.7
+            - name: Conda env info
+              shell: bash -l {0}
+              run: conda env list
+            - name: Install winpty
+              shell: bash -l {0}
+              run: conda install -y winpty
+            - name: Cargo lint
+              if: ${{ matrix.RUST_TOOLCHAIN == "stable" }}
+              shell: bash -l {0}
+              run: cargo clippy
+            - name: Cargo build
+              shell: bash -l {0}
+              run: cargo build --features conpty --features winpty
+            - name: Cargo test
+              shell: pwsh
+              run: cargo test --features conpty --features winpty
+            - name: Run tests
+              shell: pwsh
+              run: python runtests.py
+            # Enable this to get RDP access to the worker.
+            # - name: Download
+            #   if: ${{ failure() }}
+            #   run: Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
+            # - name: Extract
+            #   if: ${{ failure() }}
+            #   run: Expand-Archive ngrok.zip
+            # - name: Auth
+            #   if: ${{ failure() }}
+            #   run: .\ngrok\ngrok.exe authtoken <ngrok token>
+            # - name: Enable TS
+            #   if: ${{ failure() }}
+            #   run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+            # - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+            #   if: ${{ failure() }}
+            # - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+            #   if: ${{ failure() }}
+            # - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+            #   if: ${{ failure() }}
+            # - name: Create Tunnel
+            #   if: ${{ failure() }}
+            #   run: .\ngrok\ngrok.exe tcp 3389
