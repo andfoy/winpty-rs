@@ -29,6 +29,16 @@ jobs:
                 target: x86_64-pc-windows-msvc
                 override: true
                 components: rustfmt, clippy
+            - name: Install grcov
+              if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
+              shell: bash -l {0}
+              run: cargo install grcov
+            - name: Add llvm-tools-preview component
+              if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
+              shell: bash -l {0}
+              run: |
+                rustup component add llvm-tools-preview
+                echo "RUSTFLAGS=-Zinstrument-coverage" >> $GITHUB_ENV
             - name: Install miniconda
               uses: conda-incubator/setup-miniconda@v2
               with:
@@ -49,9 +59,17 @@ jobs:
             - name: Cargo build
               shell: bash -l {0}
               run: cargo build -vv --features conpty --features winpty
+            - name: Set LLVM_PROFILE_FILE
+              if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
+              shell: bash -l {0}
+              run: echo "LLVM_PROFILE_FILE=winpty_rs-%p-%m.profraw" >> $GITHUB_ENV
             - name: Cargo test
               shell: bash -l {0}
               run: cargo test --features conpty --features winpty
+            - name: Gather test coverage
+              if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
+              shell: bash -l {0}
+              run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
             # Enable this to get RDP access to the worker.
             # - name: Download
             #   if: ${{ failure() }}
