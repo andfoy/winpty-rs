@@ -1,8 +1,9 @@
 # WinPTY-rs
 
+[![Package licenses](https://img.shields.io/crates/l/winpty-rs?style=flat-square)](https://github.com/andfoy/winpty-rs/blob/main/LICENSE-MIT)
 [![Crates.io](https://img.shields.io/crates/v/winpty-rs?style=flat-square)](https://crates.io/crates/winpty-rs)
-[![Crates.io (recent)](https://img.shields.io/crates/dr/winpty-rs)](https://crates.io/crates/winpty-rs)
-[![docs.rs](https://img.shields.io/docsrs/winpty-rs)](https://docs.rs/winpty-rs/latest)
+[![Crates.io (recent)](https://img.shields.io/crates/dr/winpty-rs?style=flat-square)](https://crates.io/crates/winpty-rs)
+[![docs.rs](https://img.shields.io/docsrs/winpty-rs?style=flat-square)](https://docs.rs/winpty-rs/latest)
 [![Library tests](https://github.com/andfoy/winpty-rs/actions/workflows/windows_stable.yml/badge.svg)](https://github.com/andfoy/winpty-rs/actions/workflows/windows_stable.yml)
 [![codecov](https://codecov.io/gh/andfoy/winpty-rs/branch/main/graph/badge.svg?token=A15MPACXNX)](https://codecov.io/gh/andfoy/winpty-rs)
 
