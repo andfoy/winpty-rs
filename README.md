@@ -4,6 +4,7 @@
 ![Crates.io (recent)](https://img.shields.io/crates/dr/winpty-rs)
 ![docs.rs](https://img.shields.io/docsrs/winpty-rs)
 [![Library tests](https://github.com/andfoy/winpty-rs/actions/workflows/windows_stable.yml/badge.svg)](https://github.com/andfoy/winpty-rs/actions/workflows/windows_stable.yml)
+[![codecov](https://codecov.io/gh/andfoy/winpty-rs/branch/main/graph/badge.svg?token=A15MPACXNX)](https://codecov.io/gh/andfoy/winpty-rs)
 
 ## Overview
 
