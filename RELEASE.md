@@ -1,6 +1,6 @@
 To release a new version of winpty-rs:
 
-1. git fetch upstream && git checkout upstream/master
+1. git fetch upstream && git checkout upstream/main
 2. Close milestone on GitHub
 3. git clean -xfdi
 4. Update CHANGELOG.md with loghub
@@ -11,7 +11,7 @@ To release a new version of winpty-rs:
 9. git tag -a vX.X.X -m "Release vX.X.X"
 10. Update development version in ``Cargo.toml`` (add '-dev' and increment minor version)
 11. git add -A && git commit -m "Back to work"
-12. git push upstream master
+12. git push upstream main
 13. git push upstream --tags
 14. Create release in GitHub
 15. Wait for GitHub actions to publish on crates.io
