@@ -1,3 +1,13 @@
+## Version 0.1.2 (2022-01-11)
+
+
+### Pull Requests Merged
+
+* [PR 5](https://github.com/andfoy/winpty-rs/pull/5) - PR: Require PTYImpl trait to implement Send and Sync, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.1.1 (2022-01-11)
 
 ### Issues Closed
