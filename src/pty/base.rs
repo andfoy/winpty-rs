@@ -18,7 +18,7 @@ use std::os::windows::ffi::OsStrExt;
 use super::PTYArgs;
 
 /// This trait should be implemented by any backend that wants to provide a PTY implementation.
-pub trait PTYImpl {
+pub trait PTYImpl: Sync + Send {
     /// Create a new instance of the PTY backend.
     ///
     /// # Arguments
