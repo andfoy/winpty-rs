@@ -279,4 +279,9 @@ impl PTY {
     pub fn is_alive(&mut self) -> Result<bool, OsString> {
         self.pty.is_alive()
     }
+
+	/// Retrieve the process ID (PID) of the spawned program.
+	pub fn get_pid(&self) -> u32 {
+        self.pty.get_pid()
+    }
 }

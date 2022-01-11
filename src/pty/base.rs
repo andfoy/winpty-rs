@@ -90,6 +90,9 @@ pub trait PTYImpl: Sync + Send {
 
     /// Determine if the process is still alive.
     fn is_alive(&mut self) -> Result<bool, OsString>;
+
+    /// Retrieve the Process ID associated to the current process.
+    fn get_pid(&self) -> u32;
 }
 
 
@@ -390,6 +393,11 @@ impl PTYProcess {
             self.pid = GetProcessId(self.process);
             self.alive = true;
         }
+    }
+
+    /// Retrieve the Process ID associated to the current process.
+    pub fn get_pid(&self) -> u32 {
+        self.pid
     }
 
 }
