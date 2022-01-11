@@ -23,8 +23,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 use windows::core::{HRESULT, Error};
 
-use std::ptr;
-use std::mem;
+use std::{mem, env, ptr};
 use std::mem::MaybeUninit;
 use std::ffi::OsString;
 use std::os::windows::prelude::*;
@@ -368,10 +367,11 @@ impl Drop for ConPTY {
             }
 
             DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
-
             ClosePseudoConsole(self.handle);
 
-            // FreeConsole();
+            if let Err(_) = std::env::var("WINPTY_RS_TEST") {
+                FreeConsole();
+            }
         }
     }
 }
