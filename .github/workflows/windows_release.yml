@@ -1,0 +1,44 @@
+
+name: Windows release
+
+on:
+    release:
+      types:
+        - created
+
+jobs:
+    windows:
+        name: Release
+        runs-on: windows-latest
+        env:
+            RUNNER_OS: "windows"
+            CI: "1"
+        steps:
+            - name: Checkout branch
+              uses: actions/checkout@v2
+            - name: Install latest Rust stable
+              uses: actions-rs/toolchain@v1
+              with:
+                toolchain: stable
+                target: x86_64-pc-windows-msvc
+                override: true
+                components: rustfmt, clippy
+            - name: Install miniconda
+              uses: conda-incubator/setup-miniconda@v2
+              with:
+                auto-update-conda: true
+                activate-environment: test
+                channels: conda-forge,defaults
+                python-version: 3.7
+            - name: Conda env info
+              shell: bash -l {0}
+              run: conda env list
+            - name: Install winpty
+              shell: bash -l {0}
+              run: conda install -y winpty
+            - name: Cargo build
+              shell: bash -l {0}
+              run: cargo build -vv --features conpty --features winpty
+            - name: Cargo publish
+              shell: bash -l {0}
+              run: cargo publish
