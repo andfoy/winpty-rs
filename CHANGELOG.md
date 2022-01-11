@@ -1,3 +1,11 @@
+## Version 0.1.1 (2022-01-11)
+
+### Issues Closed
+
+* [Issue 4](https://github.com/andfoy/winpty-rs/issues/4) - Fix release workflow to use cargo token
+
+In this release 1 issue was closed.
+
 ## Version 0.1.0 (2022-01-11)
 
 
