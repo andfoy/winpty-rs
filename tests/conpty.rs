@@ -74,7 +74,8 @@ fn read_write_conpty() {
     }
 
     println!("!!!!!!!!!!!!!!!!!");
-    assert!(out_regex.is_match(output_str))
+    assert!(out_regex.is_match(output_str));
+    assert_ne!(pty.get_pid(), 0)
 }
 
 #[test]

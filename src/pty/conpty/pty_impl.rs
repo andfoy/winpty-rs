@@ -356,6 +356,10 @@ impl PTYImpl for ConPTY {
     fn is_alive(&mut self) -> Result<bool, OsString> {
         self.process.is_alive()
     }
+
+    fn get_pid(&self) -> u32 {
+        self.process.get_pid()
+    }
 }
 
 impl Drop for ConPTY {

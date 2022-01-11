@@ -36,4 +36,8 @@ impl PTYImpl for WinPTY {
     fn is_alive(&mut self) -> Result<bool, OsString> {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
+
+    fn get_pid(&self) -> u32 {
+        0
+    }
 }

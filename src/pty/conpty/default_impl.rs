@@ -38,4 +38,8 @@ impl PTYImpl for ConPTY {
     fn is_alive(&mut self) -> Result<bool, OsString> {
         Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
+
+    fn get_pid(&self) -> u32 {
+        0
+    }
 }
