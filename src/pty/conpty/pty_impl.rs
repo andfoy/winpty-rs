@@ -369,7 +369,7 @@ impl Drop for ConPTY {
             DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
             ClosePseudoConsole(self.handle);
 
-            if let Err(_) = std::env::var("WINPTY_RS_TEST") {
+            if std::env::var("WINPTY_RS_TEST").is_err() {
                 FreeConsole();
             }
         }
