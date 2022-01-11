@@ -41,6 +41,9 @@ pub struct ConPTY {
     process: PTYProcess
 }
 
+unsafe impl Send for ConPTY {}
+unsafe impl Sync for ConPTY {}
+
 impl PTYImpl for ConPTY {
     fn new(args: &PTYArgs) -> Result<Box<dyn PTYImpl>, OsString> {
         let mut result: HRESULT = S_OK;
