@@ -387,7 +387,7 @@ impl PTYProcess {
                 Some(bytes) => Ok(bytes),
                 None => match blocking {
                     true => self.reader_in.recv().unwrap(),
-                    false => self.reader_in.recv_timeout(Duration::from_millis(200)).unwrap_or(Ok(OsString::new()))
+                    false => self.reader_in.recv_timeout(Duration::from_millis(200)).unwrap_or_else(|_| Ok(OsString::new()))
                 }
             };
 
@@ -559,19 +559,13 @@ impl Drop for PTYProcess {
     fn drop(&mut self) {
         unsafe {
             // Unblock thread if it is waiting for a process handle.
-            match self.reader_process_out.send(None) {
-                Ok(_) => (),
-                Err(_) => ()
-            }
+            if self.reader_process_out.send(None).is_ok() { }
 
             // Cancel all pending IO operations on conout
             CancelIoEx(self.conout, ptr::null());
 
             // Send instruction to thread to finish
-            match self.reader_alive.send(false) {
-                Ok(_) => (),
-                Err(_) => ()
-            }
+            if self.reader_alive.send(false).is_ok() { }
 
             // Wait for the thread to be down
             if let Some(thread_handle) = self.reading_thread.take() {

@@ -23,7 +23,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 use windows::core::{HRESULT, Error};
 
-use std::{mem, ptr};
+use std::{mem, env, ptr};
 use std::mem::MaybeUninit;
 use std::ffi::OsString;
 use std::os::windows::prelude::*;
@@ -214,7 +214,7 @@ impl PTYImpl for ConPTY {
                 process_info: PROCESS_INFORMATION::default(),
                 startup_info: STARTUPINFOEXW::default(),
                 process: pty_process,
-                console_allocated: console_allocated
+                console_allocated
             }) as Box<dyn PTYImpl>)
         }
     }
@@ -387,7 +387,7 @@ impl Drop for ConPTY {
             DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
             ClosePseudoConsole(self.handle);
 
-            if self.console_allocated {
+            if env::var_os("CI").is_none() && self.console_allocated {
                 FreeConsole();
             }
         }
