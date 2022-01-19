@@ -1,0 +1,4 @@
+ignore:
+  - build.rs
+  - examples/*.rs
+  - src/lib.rs
