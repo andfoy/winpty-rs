@@ -72,10 +72,6 @@ fn read_write_winpty() {
 
 #[test]
 fn set_size_winpty() {
-    if &env::var("CI").unwrap_or("0".to_owned()) == "1" {
-        return;
-    }
-
     let pty_args = PTYArgs {
         cols: 80,
         rows: 25,
@@ -111,8 +107,10 @@ fn set_size_winpty() {
         }
     }
 
-    assert_eq!(rows, pty_args.rows);
-    assert_eq!(cols, pty_args.cols);
+    if &env::var("CI").unwrap_or("0".to_owned()) == "0" {
+        assert_eq!(rows, pty_args.rows);
+        assert_eq!(cols, pty_args.cols);
+    }
 
     pty.set_size(90, 30).unwrap();
     pty.write("cls\r\n".into()).unwrap();
@@ -138,8 +136,10 @@ fn set_size_winpty() {
         }
     }
 
-    assert_eq!(cols, 90);
-    assert_eq!(rows, 30);
+    if &env::var("CI").unwrap_or("0".to_owned()) == "0" {
+        assert_eq!(cols, 90);
+        assert_eq!(rows, 30);
+    }
 }
 
 #[test]
