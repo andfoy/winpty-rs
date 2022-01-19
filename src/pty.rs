@@ -105,6 +105,7 @@ pub struct PTYArgs {
 /// use winptyrs::{PTY, PTYArgs, MouseMode, AgentConfig, PTYBackend};
 ///
 /// let cmd = OsString::from("c:\\windows\\system32\\cmd.exe");
+///
 /// let pty_args = PTYArgs {
 ///     cols: 80,
 ///     rows: 25,
@@ -114,8 +115,8 @@ pub struct PTYArgs {
 /// };
 ///
 /// // Initialize a winpty and a conpty pseudoterminal.
-/// let winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
 /// let conpty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+/// let winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
 /// ```
 pub struct PTY {
 	 /// Backend used by the current pseudoterminal, must be one of [`self::PTYBackend`].
@@ -242,7 +243,7 @@ impl PTY {
     ///
     /// * The bytes returned are represented using a [`OsString`] since Windows operates over
     /// `u16` strings.
-	pub fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
+	pub fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString> {
         self.pty.read(length, blocking)
     }
 
@@ -284,4 +285,9 @@ impl PTY {
 	pub fn get_pid(&self) -> u32 {
         self.pty.get_pid()
     }
+
+	/// Retrieve the process handle ID of the spawned program.
+	pub fn get_fd(&self) -> isize {
+		self.pty.get_fd()
+	}
 }

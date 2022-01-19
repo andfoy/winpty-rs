@@ -19,7 +19,7 @@ impl PTYImpl for ConPTY {
         Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
 
-    fn read(&self, _length: u32, _blocking: bool) -> Result<OsString, OsString> {
+    fn read(&mut self, _length: u32, _blocking: bool) -> Result<OsString, OsString> {
         Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
 
@@ -41,5 +41,9 @@ impl PTYImpl for ConPTY {
 
     fn get_pid(&self) -> u32 {
         0
+    }
+
+    fn get_fd(&self) -> isize {
+        -1
     }
 }
