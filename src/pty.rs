@@ -242,7 +242,7 @@ impl PTY {
     ///
     /// * The bytes returned are represented using a [`OsString`] since Windows operates over
     /// `u16` strings.
-	pub fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
+	pub fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString> {
         self.pty.read(length, blocking)
     }
 
@@ -284,4 +284,9 @@ impl PTY {
 	pub fn get_pid(&self) -> u32 {
         self.pty.get_pid()
     }
+
+	/// Retrieve the process handle ID of the spawned program.
+	pub fn get_fd(&self) -> isize {
+		self.pty.get_fd()
+	}
 }

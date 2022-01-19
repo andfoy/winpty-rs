@@ -80,10 +80,6 @@ fn read_write_conpty() {
 
 #[test]
 fn set_size_conpty() {
-    if &env::var("CI").unwrap_or("0".to_owned()) == "1" {
-        return;
-    }
-
     let pty_args = PTYArgs {
         cols: 80,
         rows: 25,
@@ -123,6 +119,14 @@ fn set_size_conpty() {
     assert_eq!(cols, pty_args.cols);
 
     pty.set_size(90, 30).unwrap();
+
+    if &env::var("CI").unwrap_or("0".to_owned()) == "1" {
+        return;
+    }
+
+    pty.write("cls\r\n".into()).unwrap();
+    pty.write("cls\r\n".into()).unwrap();
+    pty.write("cls\r\n".into()).unwrap();
     pty.write("cls\r\n".into()).unwrap();
 
     pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
@@ -134,6 +138,8 @@ fn set_size_conpty() {
         out = pty.read(1000, false).unwrap();
         output_str = out.to_str().unwrap();
     }
+
+    println!("{:?}", output_str);
 
     let parts: Vec<&str> = output_str.split("\r\n").collect();
     let num_regex = Regex::new(r"\s+(\d+)\s+(\d+).*").unwrap();

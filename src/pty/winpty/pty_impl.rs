@@ -231,7 +231,7 @@ impl PTYImpl for WinPTY {
         self.ptr.set_size(cols, rows)
     }
 
-    fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
+    fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString> {
         self.process.read(length, blocking)
     }
 
@@ -254,4 +254,11 @@ impl PTYImpl for WinPTY {
     fn get_pid(&self) -> u32 {
         self.process.get_pid()
     }
+
+    fn get_fd(&self) -> isize {
+        self.process.get_fd()
+    }
 }
+
+unsafe impl Send for WinPTY {}
+unsafe impl Sync for WinPTY {}

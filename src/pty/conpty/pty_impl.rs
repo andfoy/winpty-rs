@@ -38,7 +38,8 @@ pub struct ConPTY {
     handle: HPCON,
     process_info: PROCESS_INFORMATION,
     startup_info: STARTUPINFOEXW,
-    process: PTYProcess
+    process: PTYProcess,
+    console_allocated: bool
 }
 
 unsafe impl Send for ConPTY {}
@@ -55,8 +56,8 @@ impl PTYImpl for ConPTY {
 
         unsafe {
             // Create a console window in case ConPTY is running in a GUI application.
-            let valid = AllocConsole().as_bool();
-            if valid {
+            let console_allocated = AllocConsole().as_bool();
+            if console_allocated {
                 ShowWindow(GetConsoleWindow(), SW_HIDE);
             }
 
@@ -212,7 +213,8 @@ impl PTYImpl for ConPTY {
                 handle: pty_handle,
                 process_info: PROCESS_INFORMATION::default(),
                 startup_info: STARTUPINFOEXW::default(),
-                process: pty_process
+                process: pty_process,
+                console_allocated: console_allocated
             }) as Box<dyn PTYImpl>)
         }
     }
@@ -221,23 +223,28 @@ impl PTYImpl for ConPTY {
         let result: HRESULT;
         let mut environ: *const u16 = ptr::null();
         let mut working_dir: *mut u16 = ptr::null_mut();
+        let mut env_buf: Vec<u16>;
+        let mut cwd_buf: Vec<u16>;
+        let cmd_buf: Vec<u16>;
 
         let mut cmdline_oss = OsString::new();
         cmdline_oss.clone_from(&appname);
         let mut cmdline_oss_buf: Vec<u16> = cmdline_oss.encode_wide().collect();
 
         if let Some(env_opt) = env {
-            let env_buf: Vec<u16> = env_opt.encode_wide().collect();
+            env_buf = env_opt.encode_wide().collect();
+            env_buf.push(0);
             environ = env_buf.as_ptr();
         }
 
         if let Some(cwd_opt) = cwd {
-            let mut cwd_buf: Vec<u16> = cwd_opt.encode_wide().collect();
+            cwd_buf = cwd_opt.encode_wide().collect();
+            cwd_buf.push(0);
             working_dir = cwd_buf.as_mut_ptr();
         }
 
         if let Some(cmdline_opt) = cmdline {
-            let cmd_buf: Vec<u16> = cmdline_opt.encode_wide().collect();
+            cmd_buf = cmdline_opt.encode_wide().collect();
             cmdline_oss_buf.push(0x0020);
             cmdline_oss_buf.extend(cmd_buf);
         }
@@ -337,7 +344,7 @@ impl PTYImpl for ConPTY {
         }
     }
 
-    fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
+    fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString> {
         self.process.read(length, blocking)
     }
 
@@ -360,6 +367,10 @@ impl PTYImpl for ConPTY {
     fn get_pid(&self) -> u32 {
         self.process.get_pid()
     }
+
+    fn get_fd(&self) -> isize {
+        self.process.get_fd()
+    }
 }
 
 impl Drop for ConPTY {
@@ -376,7 +387,7 @@ impl Drop for ConPTY {
             DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
             ClosePseudoConsole(self.handle);
 
-            if env::var("WINPTY_RS_TEST").is_err() {
+            if env::var_os("WINPTY_RS_TEST").is_some() {
                 FreeConsole();
             }
         }
