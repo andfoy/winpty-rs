@@ -387,7 +387,7 @@ impl Drop for ConPTY {
             DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
             ClosePseudoConsole(self.handle);
 
-            if env::var_os("WINPTY_RS_TEST").is_some() {
+            if self.console_allocated {
                 FreeConsole();
             }
         }

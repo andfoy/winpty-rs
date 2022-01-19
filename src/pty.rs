@@ -105,6 +105,8 @@ pub struct PTYArgs {
 /// use winptyrs::{PTY, PTYArgs, MouseMode, AgentConfig, PTYBackend};
 ///
 /// let cmd = OsString::from("c:\\windows\\system32\\cmd.exe");
+/// let cmd2 = cmd.clone();
+///
 /// let pty_args = PTYArgs {
 ///     cols: 80,
 ///     rows: 25,
@@ -114,8 +116,11 @@ pub struct PTYArgs {
 /// };
 ///
 /// // Initialize a winpty and a conpty pseudoterminal.
-/// let winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
-/// let conpty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+/// let mut conpty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+/// conpty.spawn(cmd, None, None, None).unwrap();
+///
+/// let mut winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+/// winpty.spawn(cmd2, None, None, None).unwrap();
 /// ```
 pub struct PTY {
 	 /// Backend used by the current pseudoterminal, must be one of [`self::PTYBackend`].
