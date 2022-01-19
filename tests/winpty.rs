@@ -1,6 +1,7 @@
 #![cfg(feature="winpty")]
 
 use std::ffi::OsString;
+use std::env;
 use regex::Regex;
 
 use winptyrs::{PTY, PTYArgs, PTYBackend, MouseMode, AgentConfig};
@@ -71,6 +72,10 @@ fn read_write_winpty() {
 
 #[test]
 fn set_size_winpty() {
+    if &env::var("CI").unwrap_or("0".to_owned()) == "1" {
+        return;
+    }
+
     let pty_args = PTYArgs {
         cols: 80,
         rows: 25,
