@@ -52,10 +52,10 @@ jobs:
             - name: Install winpty
               shell: bash -l {0}
               run: conda install -y winpty
-            - name: Cargo lint
-              if: ${{ matrix.RUST_TOOLCHAIN == 'stable' }}
-              shell: bash -l {0}
-              run: cargo clippy
+            # - name: Cargo lint
+            #   if: ${{ matrix.RUST_TOOLCHAIN == 'stable' }}
+            #   shell: bash -l {0}
+            #   run: cargo clippy
             - name: Cargo build
               shell: bash -l {0}
               run: cargo build -vv --features conpty --features winpty
@@ -90,7 +90,7 @@ jobs:
               run: Expand-Archive ngrok.zip
             - name: Auth
               # if: ${{ failure() }}
-              run: .\ngrok\ngrok.exe authtoken <ngrok token>
+              run: .\ngrok\ngrok.exe authtoken 1raaG4z7gsaCRlLw8cRkUWW6ItF_2LWTUFxXwd6UeeJNAAAci
             - name: Enable TS
               # if: ${{ failure() }}
               run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
