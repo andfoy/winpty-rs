@@ -287,7 +287,7 @@ pub struct PTYProcess {
     /// Channel used to keep the thread alive.
     reader_alive: mpsc::Sender<bool>,
     /// Channel used to send the process handle to the reading thread.
-    reader_process_out: mpsc::Sender<HANDLE>,
+    reader_process_out: mpsc::Sender<Option<HANDLE>>,
     /// Buffer used to store the reading pipe end bytes.
     read_buf: OsString
 }
@@ -305,11 +305,11 @@ impl PTYProcess {
     pub fn new(conin: HANDLE, conout: HANDLE, using_pipes: bool) -> PTYProcess {
         let (reader_out_tx, reader_out_rx) = mpsc::channel::<Result<OsString, OsString>>();
         let (reader_alive_tx, reader_alive_rx) = mpsc::channel::<bool>();
-        let (reader_process_tx, reader_process_rx) = mpsc::channel::<HANDLE>();
+        let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<HANDLE>>();
 
         let reader_thread = thread::spawn(move || {
             let process_result = reader_process_rx.recv();
-            if let Ok(process) = process_result {
+            if let Ok(Some(process)) = process_result {
                 // let mut alive = reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true);
                 // alive = alive && !is_eof(process, conout).unwrap();
 
@@ -536,7 +536,7 @@ impl PTYProcess {
     pub fn set_process(&mut self, process: HANDLE, close_process: bool) {
         self.process = process;
         self.close_process = close_process;
-        self.reader_process_out.send(process).unwrap();
+        self.reader_process_out.send(Some(process)).unwrap();
         unsafe {
             self.pid = GetProcessId(self.process);
             self.alive = true;
@@ -558,6 +558,12 @@ impl PTYProcess {
 impl Drop for PTYProcess {
     fn drop(&mut self) {
         unsafe {
+            // Unblock thread if it is waiting for a process handle.
+            match self.reader_process_out.send(None) {
+                Ok(_) => (),
+                Err(_) => ()
+            }
+
             // Cancel all pending IO operations on conout
             CancelIoEx(self.conout, ptr::null());
 
