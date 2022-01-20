@@ -66,7 +66,7 @@ pub trait PTYImpl: Sync + Send {
     ///
     /// * The bytes returned are represented using a [`OsString`] since Windows operates over
     /// `u16` strings.
-    fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString>;
+    fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString>;
 
     /// Write a (possibly) UTF-16 string into the standard input of a process.
     ///
@@ -83,16 +83,16 @@ pub trait PTYImpl: Sync + Send {
     /// # Returns
     /// `true` if the process reached EOL, false otherwise. If an error occurs, then a [`OsString`]
     /// containing a human-readable error is raised.
-    fn is_eof(&mut self) -> Result<bool, OsString>;
+    fn is_eof(&self) -> Result<bool, OsString>;
 
     /// Retrieve the exit status of the process
     ///
     /// # Returns
     /// `None` if the process has not exited, else the exit code of the process.
-    fn get_exitstatus(&mut self) -> Result<Option<u32>, OsString>;
+    fn get_exitstatus(&self) -> Result<Option<u32>, OsString>;
 
     /// Determine if the process is still alive.
-    fn is_alive(&mut self) -> Result<bool, OsString>;
+    fn is_alive(&self) -> Result<bool, OsString>;
 
     /// Retrieve the Process ID associated to the current process.
     fn get_pid(&self) -> u32;
@@ -274,22 +274,22 @@ pub struct PTYProcess {
     conout: HANDLE,
     /// Identifier of the process running inside the PTY.
     pid: u32,
-    /// Exit status code of the process running inside the PTY.
-    exitstatus: Option<u32>,
-    /// Attribute that declares if the process is alive.
-    alive: bool,
     /// Close process when the struct is dropped.
     close_process: bool,
     /// Handle to the thread used to read from the standard output.
     reading_thread: Option<thread::JoinHandle<()>>,
-    /// Channel used to retrieve bytes from the standard input thread.
-    reader_in: mpsc::Receiver<Result<OsString, OsString>>,
     /// Channel used to keep the thread alive.
     reader_alive: mpsc::Sender<bool>,
     /// Channel used to send the process handle to the reading thread.
     reader_process_out: mpsc::Sender<Option<HANDLE>>,
-    /// Buffer used to store the reading pipe end bytes.
-    read_buf: OsString
+    /// Handle to the thread used to cache read output.
+    cache_thread: Option<thread::JoinHandle<()>>,
+    /// Channel used to submit a retrieval request to the cache.
+    cache_req: mpsc::Sender<Option<(u32, bool)>>,
+    /// Channel used to receive a response from the cache.
+    cache_resp: mpsc::Receiver<Result<OsString, OsString>>,
+    /// Channel used to keep the cache alive.
+    cache_alive: mpsc::Sender<bool>,
 }
 
 impl PTYProcess {
@@ -303,9 +303,15 @@ impl PTYProcess {
     /// # Returns
     /// * `pty` - A new [`PTYProcess`] instance.
     pub fn new(conin: HANDLE, conout: HANDLE, using_pipes: bool) -> PTYProcess {
-        let (reader_out_tx, reader_out_rx) = mpsc::channel::<Result<OsString, OsString>>();
+        // Continuous reading thread channels
+        let (reader_out_tx, reader_out_rx) = mpsc::channel::<Option<Result<OsString, OsString>>>();
         let (reader_alive_tx, reader_alive_rx) = mpsc::channel::<bool>();
         let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<HANDLE>>();
+
+        // Reading cache thread channels
+        let (cache_alive_tx, cache_alive_rx) = mpsc::channel::<bool>();
+        let (cache_req_tx, cache_req_rx) = mpsc::channel::<Option<(u32, bool)>>();
+        let (cache_resp_tx, cache_resp_rx) = mpsc::channel::<Result<OsString, OsString>>();
 
         let reader_thread = thread::spawn(move || {
             let process_result = reader_process_rx.recv();
@@ -316,7 +322,9 @@ impl PTYProcess {
                 while reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true) {
                     if !is_eof(process, conout).unwrap() {
                         let result = read(4096, true, conout, using_pipes);
-                        reader_out_tx.send(result).unwrap();
+                        reader_out_tx.send(Some(result)).unwrap();
+                    } else {
+                        reader_out_tx.send(None).unwrap();
                     }
                     // alive = reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true);
                     // alive = alive && !is_eof(process, conout).unwrap();
@@ -328,19 +336,72 @@ impl PTYProcess {
             drop(reader_out_tx);
         });
 
+        let cache_thread = thread::spawn(move || {
+            let mut read_buf = OsString::new();
+            while cache_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true) {
+                if let Ok(Some((length, blocking))) = cache_req_rx.recv() {
+                    let mut pending_read: Option<OsString> = None;
+
+                    if (length as usize) < read_buf.len() {
+                        pending_read = Some(OsString::new());
+                    }
+
+                    let out =
+                        match pending_read {
+                            Some(bytes) => Ok(bytes),
+                            None => {
+                                match blocking {
+                                    true => {
+                                        match reader_out_rx.recv() {
+                                            Ok(None) => Err(OsString::from("Standard out reached EOF")),
+                                            Ok(Some(bytes)) => bytes,
+                                            Err(_) => Ok(OsString::new())
+                                        }
+                                    },
+                                    false => {
+                                        match reader_out_rx.recv_timeout(Duration::from_millis(200)) {
+                                            Ok(None) => Err(OsString::from("Standard out reached EOF")),
+                                            Ok(Some(bytes)) => bytes,
+                                            Err(_) => Ok(OsString::new())
+                                        }
+                                    }
+                                }
+                            }
+                        };
+
+                    match out {
+                        Ok(bytes) => {
+                            read_buf.push(bytes);
+                            let vec_buf: Vec<u16> = read_buf.encode_wide().collect();
+                            let to_read = min(length as usize, vec_buf.len());
+                            let (left, right) = vec_buf.split_at(to_read);
+                            let to_return = OsString::from_wide(left);
+                            read_buf = OsString::from_wide(right);
+                            cache_resp_tx.send(Ok(to_return)).unwrap();
+                        },
+                        Err(err) => { cache_resp_tx.send(Err(err)).unwrap(); }
+                    }
+                }
+            }
+
+            drop(reader_out_rx);
+            drop(cache_alive_rx);
+            drop(cache_resp_tx);
+        });
+
         PTYProcess {
             process: HANDLE(0),
             conin,
             conout,
             pid: 0,
-            exitstatus: None,
-            alive: false,
             close_process: true,
             reading_thread: Some(reader_thread),
-            reader_in: reader_out_rx,
             reader_alive: reader_alive_tx,
             reader_process_out: reader_process_tx,
-            read_buf: OsString::new()
+            cache_thread: Some(cache_thread),
+            cache_req: cache_req_tx,
+            cache_resp: cache_resp_rx,
+            cache_alive: cache_alive_tx,
         }
     }
 
@@ -357,51 +418,14 @@ impl PTYProcess {
     ///
     /// * The bytes returned are represented using a [`OsString`] since Windows operates over
     /// `u16` strings.
-    pub fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString> {
+    pub fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
         // read(length, blocking, self.conout, self.using_pipes)
-        let mut pending_read: Option<OsString> = None;
+        self.cache_req.send(Some((length, blocking))).unwrap();
 
-        if (length as usize) < self.read_buf.len() {
-            pending_read = Some(OsString::new())
-        }
-
-        if pending_read.is_none() {
-            if let Ok(eof) = self.is_alive() {
-                let channel_contents = self.reader_in.try_recv();
-                match channel_contents {
-                    Ok(contents) => {
-                        pending_read = Some(contents.unwrap())
-                    }
-                    Err(_) => {
-                        if !eof {
-                            return Err(OsString::from("Standard out reached EOF"))
-                        }
-                    }
-                }
-            }
-        }
-
-
-        let out =
-            match pending_read {
-                Some(bytes) => Ok(bytes),
-                None => match blocking {
-                    true => self.reader_in.recv().unwrap(),
-                    false => self.reader_in.recv_timeout(Duration::from_millis(200)).unwrap_or_else(|_| Ok(OsString::new()))
-                }
-            };
-
-        match out {
-            Ok(bytes) => {
-                self.read_buf.push(bytes);
-                let vec_buf: Vec<u16> = self.read_buf.encode_wide().collect();
-                let to_read = min(length as usize, vec_buf.len());
-                let (left, right) = vec_buf.split_at(to_read);
-                let to_return = OsString::from_wide(left);
-                self.read_buf = OsString::from_wide(right);
-                Ok(to_return)
-            },
-            Err(err) => Err(err)
+        match self.cache_resp.recv() {
+            Ok(Ok(bytes)) => Ok(bytes),
+            Ok(Err(err)) => Err(err),
+            Err(err) => Err(err.to_string().into())
         }
         // let out = self.reader_in.recv().unwrap();
         // out
@@ -460,7 +484,7 @@ impl PTYProcess {
     /// # Returns
     /// `true` if the process reached EOL, false otherwise. If an error occurs, then a [`OsString`]
     /// containing a human-readable error is raised.
-    pub fn is_eof(&mut self) -> Result<bool, OsString> {
+    pub fn is_eof(&self) -> Result<bool, OsString> {
         // let mut available_bytes: Box<u32> = Box::new_uninit();
         // let bytes_ptr: *mut u32 = &mut *available_bytes;
         // let bytes_ptr: *mut u32 = ptr::null_mut();
@@ -496,36 +520,24 @@ impl PTYProcess {
     ///
     /// # Returns
     /// `None` if the process has not exited, else the exit code of the process.
-    pub fn get_exitstatus(&mut self) -> Result<Option<u32>, OsString> {
+    pub fn get_exitstatus(&self) -> Result<Option<u32>, OsString> {
         if self.pid == 0 {
             return Ok(None);
         }
-        if self.alive {
-            match self.is_alive() {
-                Ok(_) => {},
-                Err(err) => {
-                    return Err(err)
-                }
-            }
-        }
-        if self.alive {
-            return Ok(None);
-        }
 
-        match self.exitstatus {
-            Some(exit) => Ok(Some(exit)),
-            None => Ok(None)
+        match is_alive(self.process) {
+            Ok((true, _)) => Ok(None),
+            Ok((false, exitstatus)) => Ok(exitstatus),
+            Err(err) => Err(err)
         }
     }
 
     /// Determine if the process is still alive.
-    pub fn is_alive(&mut self) -> Result<bool, OsString> {
+    pub fn is_alive(&self) -> Result<bool, OsString> {
         // let mut exit_code: Box<u32> = Box::new_uninit();
         // let exit_ptr: *mut u32 = &mut *exit_code;
         match is_alive(self.process) {
-            Ok((alive, exitstatus)) => {
-                self.alive = alive;
-                self.exitstatus = exitstatus;
+            Ok((alive, _)) => {
                 Ok(alive)
             },
             Err(err) => Err(err)
@@ -539,7 +551,6 @@ impl PTYProcess {
         self.reader_process_out.send(Some(process)).unwrap();
         unsafe {
             self.pid = GetProcessId(self.process);
-            self.alive = true;
         }
     }
 
@@ -570,6 +581,17 @@ impl Drop for PTYProcess {
             // Wait for the thread to be down
             if let Some(thread_handle) = self.reading_thread.take() {
                 thread_handle.join().unwrap();
+            }
+
+            // Send message to cache to finish
+            if self.cache_alive.send(false).is_ok() {}
+
+            // Send a None request to the cache in order to prevent blockage
+            if self.cache_req.send(None).is_ok() {}
+
+            // Wait for the cache to be down
+            if let Some(cache_handle) = self.cache_thread.take() {
+                cache_handle.join().unwrap();
             }
 
             if !self.conin.is_invalid() {

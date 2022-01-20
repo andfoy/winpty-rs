@@ -243,7 +243,7 @@ impl PTY {
     ///
     /// * The bytes returned are represented using a [`OsString`] since Windows operates over
     /// `u16` strings.
-	pub fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString> {
+	pub fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
         self.pty.read(length, blocking)
     }
 
@@ -264,7 +264,7 @@ impl PTY {
     /// # Returns
     /// `true` if the process reached EOL, false otherwise. If an error occurs, then a [`OsString`]
     /// containing a human-readable error is raised.
-    pub fn is_eof(&mut self) -> Result<bool, OsString> {
+    pub fn is_eof(&self) -> Result<bool, OsString> {
 		self.pty.is_eof()
     }
 
@@ -272,12 +272,12 @@ impl PTY {
     ///
     /// # Returns
     /// `None` if the process has not exited, else the exit code of the process.
-    pub fn get_exitstatus(&mut self) -> Result<Option<u32>, OsString> {
+    pub fn get_exitstatus(&self) -> Result<Option<u32>, OsString> {
         self.pty.get_exitstatus()
     }
 
 	/// Determine if the process is still alive.
-    pub fn is_alive(&mut self) -> Result<bool, OsString> {
+    pub fn is_alive(&self) -> Result<bool, OsString> {
         self.pty.is_alive()
     }
 

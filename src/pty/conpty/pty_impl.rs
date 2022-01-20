@@ -344,7 +344,7 @@ impl PTYImpl for ConPTY {
         }
     }
 
-    fn read(&mut self, length: u32, blocking: bool) -> Result<OsString, OsString> {
+    fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
         self.process.read(length, blocking)
     }
 
@@ -352,15 +352,15 @@ impl PTYImpl for ConPTY {
         self.process.write(buf)
     }
 
-    fn is_eof(&mut self) -> Result<bool, OsString> {
+    fn is_eof(&self) -> Result<bool, OsString> {
         self.process.is_eof()
     }
 
-    fn get_exitstatus(&mut self) -> Result<Option<u32>, OsString> {
+    fn get_exitstatus(&self) -> Result<Option<u32>, OsString> {
         self.process.get_exitstatus()
     }
 
-    fn is_alive(&mut self) -> Result<bool, OsString> {
+    fn is_alive(&self) -> Result<bool, OsString> {
         self.process.is_alive()
     }
 
