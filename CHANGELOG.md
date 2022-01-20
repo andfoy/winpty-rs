@@ -1,3 +1,19 @@
+## Version 0.3.0 (2022/01/20)
+
+### Issues Closed
+
+* [Issue 10](https://github.com/andfoy/winpty-rs/issues/10) - Release v0.3.0
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 9](https://github.com/andfoy/winpty-rs/pull/9) - PR: Fix concurrency errors related to read and other safety issues, by [@andfoy](https://github.com/andfoy)
+* [PR 8](https://github.com/andfoy/winpty-rs/pull/8) - PR: Improve read performance and rewrite iseof, by [@andfoy](https://github.com/andfoy)
+
+In this release 2 pull requests were closed.
+
+
 ## Version 0.2.0 (2022-01-11)
 
 
