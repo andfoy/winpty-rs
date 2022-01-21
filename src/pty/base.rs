@@ -6,6 +6,9 @@ use windows::Win32::System::Pipes::PeekNamedPipe;
 use windows::Win32::System::IO::{OVERLAPPED, CancelIoEx};
 use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId};
 use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8};
+use windows::Win32::System::Console::{
+    GetStdHandle, SetStdHandle, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+    STD_INPUT_HANDLE, FreeConsole};
 use windows::core::{HRESULT, Error};
 
 use std::ptr;
@@ -313,7 +316,23 @@ impl PTYProcess {
         let (cache_req_tx, cache_req_rx) = mpsc::channel::<Option<(u32, bool)>>();
         let (cache_resp_tx, cache_resp_rx) = mpsc::channel::<Result<OsString, OsString>>();
 
+        let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        let stdin = GetStdHandle(STD_INPUT_HANDLE);
+        let stderr = GetStdHandle(STD_ERROR_HANDLE);
+
+        println!("Out: {}", stdout.0);
+        println!("In: {}", stdin.0);
+        println!("Err: {}", stderr.0);
+
         let reader_thread = thread::spawn(move || {
+            let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+            let stdin = GetStdHandle(STD_INPUT_HANDLE);
+            let stderr = GetStdHandle(STD_ERROR_HANDLE);
+
+            println!("Thread out: {}", stdout.0);
+            println!("Thread in: {}", stdin.0);
+            println!("Thread err: {}", stderr.0);
+
             let process_result = reader_process_rx.recv();
             if let Ok(Some(process)) = process_result {
                 // let mut alive = reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true);
