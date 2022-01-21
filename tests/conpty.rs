@@ -35,16 +35,16 @@ fn read_write_conpty() {
         agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES
     };
 
+    if env::var_os("CI").is_some() {
+        // re_pattern = ".*cmd.*"
+        env::set_var("CONPTY_CI", "1");
+    }
+
     let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
-    let mut re_pattern: &str = r".*Microsoft Windows.*";
-
-    if env::var_os("CI").is_some() {
-        re_pattern = ".*cmd.*"
-    }
-
+    let re_pattern: &str = r".*Microsoft Windows.*";
     let regex = Regex::new(re_pattern).unwrap();
     let mut output_str = "";
     let mut out: OsString;
