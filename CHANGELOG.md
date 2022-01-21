@@ -1,3 +1,18 @@
+## Version 0.3.1 (2022/01/21)
+
+### Issues Closed
+
+* [Issue 12](https://github.com/andfoy/winpty-rs/issues/12) - Release v0.3.1
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 11](https://github.com/andfoy/winpty-rs/pull/11) - PR: Fix some unstable issues related to reading testing on CI, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.3.0 (2022/01/20)
 
 ### Issues Closed
