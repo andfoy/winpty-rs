@@ -39,20 +39,17 @@ fn read_write_conpty() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
-    let mut re_pattern: &str = r".*Microsoft Windows.*";
-
-    if env::var_os("CI").is_some() {
-        re_pattern = ".*cmd.*"
-    }
-
+    let re_pattern: &str = r".*Microsoft Windows.*";
     let regex = Regex::new(re_pattern).unwrap();
     let mut output_str = "";
     let mut out: OsString;
+    let mut tries = 0;
 
-    while !regex.is_match(output_str) {
+    while !regex.is_match(output_str) && tries < 5 {
         out = pty.read(1000, false).unwrap();
         output_str = out.to_str().unwrap();
         println!("{:?}", output_str);
+        tries += 1;
     }
 
     assert!(regex.is_match(output_str));

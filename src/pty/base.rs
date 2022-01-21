@@ -9,6 +9,7 @@ use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP
 use windows::core::{HRESULT, Error};
 
 use std::ptr;
+use std::env;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -548,6 +549,16 @@ impl PTYProcess {
     pub fn set_process(&mut self, process: HANDLE, close_process: bool) {
         self.process = process;
         self.close_process = close_process;
+
+        if env::var_os("CONPTY_CI").is_some() {
+            // For some reason, the CI requires a flush of the handle before
+            // reading from a thread.
+            let result = read(4096, true, self.conout, false).unwrap();
+            println!("{:?}", result);
+            let result = read(4096, true, self.conout, false).unwrap();
+            println!("{:?}", result);
+        }
+
         self.reader_process_out.send(Some(process)).unwrap();
         unsafe {
             self.pid = GetProcessId(self.process);
