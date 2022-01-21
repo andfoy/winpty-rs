@@ -316,22 +316,26 @@ impl PTYProcess {
         let (cache_req_tx, cache_req_rx) = mpsc::channel::<Option<(u32, bool)>>();
         let (cache_resp_tx, cache_resp_rx) = mpsc::channel::<Result<OsString, OsString>>();
 
-        let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-        let stdin = GetStdHandle(STD_INPUT_HANDLE);
-        let stderr = GetStdHandle(STD_ERROR_HANDLE);
-
-        println!("Out: {}", stdout.0);
-        println!("In: {}", stdin.0);
-        println!("Err: {}", stderr.0);
-
-        let reader_thread = thread::spawn(move || {
+        unsafe {
             let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
             let stdin = GetStdHandle(STD_INPUT_HANDLE);
             let stderr = GetStdHandle(STD_ERROR_HANDLE);
 
-            println!("Thread out: {}", stdout.0);
-            println!("Thread in: {}", stdin.0);
-            println!("Thread err: {}", stderr.0);
+            println!("Out: {}", stdout.0);
+            println!("In: {}", stdin.0);
+            println!("Err: {}", stderr.0);
+        }
+
+        let reader_thread = thread::spawn(move || {
+            unsafe {
+                let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+                let stdin = GetStdHandle(STD_INPUT_HANDLE);
+                let stderr = GetStdHandle(STD_ERROR_HANDLE);
+
+                println!("Thread out: {}", stdout.0);
+                println!("Thread in: {}", stdin.0);
+                println!("Thread err: {}", stderr.0);
+            }
 
             let process_result = reader_process_rx.recv();
             if let Ok(Some(process)) = process_result {
