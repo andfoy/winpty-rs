@@ -1,3 +1,18 @@
+## Version 0.3.2 (2022/01/24)
+
+### Issues Closed
+
+* [Issue 15](https://github.com/andfoy/winpty-rs/issues/15) - Release v0.3.2
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 13](https://github.com/andfoy/winpty-rs/pull/13) - PR: Fix some issues related to wstring creation in winpty spawn arguments, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.3.1 (2022/01/21)
 
 ### Issues Closed
