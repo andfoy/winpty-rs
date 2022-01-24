@@ -185,32 +185,37 @@ impl PTYImpl for WinPTY {
 
     fn spawn(&mut self, appname: OsString, cmdline: Option<OsString>, cwd: Option<OsString>, env: Option<OsString>) -> Result<bool, OsString> {
         let mut environ: *const u16 = ptr::null();
-        let mut working_dir: *const u16 = ptr::null();
+        let mut working_dir: *const u16 = ptr::null_mut();
+        let mut cmd: *const u16 = ptr::null_mut();
 
-        let mut cmdline_oss = OsString::new();
-        cmdline_oss.push("\0\0");
-        let cmdline_oss_buf: Vec<u16> = cmdline_oss.encode_wide().collect();
-        let mut cmd = cmdline_oss_buf.as_ptr();
+        let mut env_buf: Vec<u16>;
+        let mut cwd_buf: Vec<u16>;
+        let mut cmd_buf: Vec<u16>;
+
+        let mut app_oss = OsString::new();
+        app_oss.clone_from(&appname);
+        let mut app_oss_buf: Vec<u16> = app_oss.encode_wide().collect();
+        app_oss_buf.push(0);
 
         if let Some(env_opt) = env {
-            let env_buf: Vec<u16> = env_opt.encode_wide().collect();
+            env_buf = env_opt.encode_wide().collect();
+            env_buf.push(0);
             environ = env_buf.as_ptr();
         }
 
         if let Some(cwd_opt) = cwd {
-            let cwd_buf: Vec<u16> = cwd_opt.encode_wide().collect();
+            cwd_buf = cwd_opt.encode_wide().collect();
+            cwd_buf.push(0);
             working_dir = cwd_buf.as_ptr();
         }
 
         if let Some(cmdline_opt) = cmdline {
-            let cmd_buf: Vec<u16> = cmdline_opt.encode_wide().collect();
+            cmd_buf = cmdline_opt.encode_wide().collect();
+            cmd_buf.push(0);
             cmd = cmd_buf.as_ptr();
         }
 
-        let mut app_buf: Vec<u16> = appname.encode_wide().collect();
-        app_buf.push(0);
-        let app = app_buf.as_ptr();
-
+        let app = app_oss_buf.as_ptr();
         match self.ptr.spawn(app, cmd, working_dir, environ) {
             Ok(handle) => {
                 self.process.set_process(handle, true);
