@@ -557,7 +557,7 @@ impl PTYProcess {
             let result = read(4096, true, self.conout, false).unwrap();
             println!("{:?}", result);
             let res: Result<u32, OsString> = self.write(OsString::from("\r\n\r\n"));
-            res.unwrap()
+            res.unwrap();
         }
 
         self.reader_process_out.send(Some(process)).unwrap();
