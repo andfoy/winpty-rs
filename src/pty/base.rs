@@ -552,10 +552,11 @@ impl PTYProcess {
         if env::var_os("CONPTY_CI").is_some() {
             // For some reason, the CI requires a flush of the handle before
             // reading from a thread.
-            let result = read(4096, true, self.conout, false).unwrap();
-            println!("{:?}", result);
-            let result = read(4096, true, self.conout, false).unwrap();
-            println!("{:?}", result);
+            // let result = read(4096, true, self.conout, false).unwrap();
+            // println!("{:?}", result);
+            // let result = read(4096, true, self.conout, false).unwrap();
+            // println!("{:?}", result);
+            self.write(OsString::new("\r\n\r\n"))
         }
 
         self.reader_process_out.send(Some(process)).unwrap();
