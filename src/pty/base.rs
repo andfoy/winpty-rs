@@ -442,7 +442,6 @@ impl PTYProcess {
     /// an [`OsString`] containing an human-readable error.
     pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
         let mut vec_buf: Vec<u16> = buf.encode_wide().collect();
-        vec_buf.push(0);
 
         let null_overlapped: *mut OVERLAPPED = ptr::null_mut();
         let result: HRESULT;
@@ -450,14 +449,14 @@ impl PTYProcess {
         unsafe {
             let pwstr = PWSTR(vec_buf.as_mut_ptr());
             let required_size = WideCharToMultiByte(
-                CP_UTF8, 0, pwstr, -1, PSTR(ptr::null_mut::<u8>()),
+                CP_UTF8, 0, pwstr, vec_buf.len().try_into().map_err(|_| "buf too large")?, PSTR(ptr::null_mut::<u8>()),
                 0, PSTR(ptr::null_mut::<u8>()), ptr::null_mut::<i32>());
 
             let mut bytes_buf: Vec<u8> = std::iter::repeat(0).take((required_size) as usize).collect();
             let bytes_buf_ptr = bytes_buf.as_mut_ptr();
             let pstr = PSTR(bytes_buf_ptr);
 
-            WideCharToMultiByte(CP_UTF8, 0, pwstr, -1, pstr, required_size, PSTR(ptr::null_mut::<u8>()), ptr::null_mut::<i32>());
+            WideCharToMultiByte(CP_UTF8, 0, pwstr, vec_buf.len().try_into().unwrap(), pstr, required_size, PSTR(ptr::null_mut::<u8>()), ptr::null_mut::<i32>());
 
             let mut written_bytes = MaybeUninit::<u32>::uninit();
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*written_bytes.as_mut_ptr());
