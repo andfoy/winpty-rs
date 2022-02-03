@@ -1,3 +1,19 @@
+## Version 0.3.3 (2022/02/02)
+
+### Issues Closed
+
+* [Issue 18](https://github.com/andfoy/winpty-rs/issues/18) - Release v0.3.3
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 17](https://github.com/andfoy/winpty-rs/pull/17) - PR: Emit newline in process when setting CONPTY_CI, by [@andfoy](https://github.com/andfoy)
+* [PR 16](https://github.com/andfoy/winpty-rs/pull/16) - Fix write corruption caused by writing an unintended NUL byte, by [@segevfiner](https://github.com/segevfiner) ([210](https://github.com/spyder-ide/pywinpty/issues/210))
+
+In this release 2 pull requests were closed.
+
+
 ## Version 0.3.2 (2022/01/24)
 
 ### Issues Closed
