@@ -1,7 +1,7 @@
 #![cfg(feature="conpty")]
 
 use std::ffi::OsString;
-use std::{thread, time, env};
+use std::{thread, time};
 use regex::Regex;
 
 use winptyrs::{PTY, PTYArgs, PTYBackend, MouseMode, AgentConfig};

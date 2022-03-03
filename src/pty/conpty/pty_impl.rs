@@ -391,9 +391,9 @@ impl Drop for ConPTY {
             DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
             ClosePseudoConsole(self.handle);
 
-            if env::var_os("CI").is_none() && self.console_allocated {
+            // if env::var_os("CI").is_none() && self.console_allocated {
                 FreeConsole();
-            }
+            // }
         }
     }
 }
