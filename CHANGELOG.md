@@ -1,3 +1,20 @@
+## Version 0.3.4 (2022/03/03)
+
+### Issues Closed
+
+* [Issue 25](https://github.com/andfoy/winpty-rs/issues/25) - Release v0.3.4
+* [Issue 23](https://github.com/andfoy/winpty-rs/issues/23) - ConPTY tests are failing on CIs
+
+In this release 2 issues were closed.
+
+### Pull Requests Merged
+
+* [PR 24](https://github.com/andfoy/winpty-rs/pull/24) - PR: Remove CI constraints used with windows-2019, by [@andfoy](https://github.com/andfoy)
+* [PR 22](https://github.com/andfoy/winpty-rs/pull/22) - Bump actions/checkout from 2 to 3, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 2 pull requests were closed.
+
+
 ## Version 0.3.3 (2022/02/02)
 
 ### Issues Closed
