@@ -115,31 +115,35 @@ fn set_size_winpty() {
     pty.set_size(90, 30).unwrap();
     pty.write("cls\r\n".into()).unwrap();
 
-    pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
-    let regex = Regex::new(r".*Width.*").unwrap();
-    let mut output_str = "";
-    let mut out: OsString;
+    let mut count = 0;
+    while count < 5 || (cols != 90 && rows != 30) {
+        pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
+        let regex = Regex::new(r".*Width.*").unwrap();
+        let mut output_str = "";
+        let mut out: OsString;
 
-    while !regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
-        output_str = out.to_str().unwrap();
-    }
+        while !regex.is_match(output_str) {
+            out = pty.read(1000, false).unwrap();
+            output_str = out.to_str().unwrap();
+        }
 
-    let parts: Vec<&str> = output_str.split("\r\n").collect();
-    let num_regex = Regex::new(r"\s+(\d+)\s+(\d+).*").unwrap();
-    for part in parts {
-        if num_regex.is_match(part) {
-            for cap in num_regex.captures_iter(part) {
-                cols = cap[1].parse().unwrap();
-                rows = cap[2].parse().unwrap();
+        let parts: Vec<&str> = output_str.split("\r\n").collect();
+        let num_regex = Regex::new(r"\s+(\d+)\s+(\d+).*").unwrap();
+        for part in parts {
+            if num_regex.is_match(part) {
+                for cap in num_regex.captures_iter(part) {
+                    cols = cap[1].parse().unwrap();
+                    rows = cap[2].parse().unwrap();
+                }
             }
         }
-    }
 
-    if &env::var("CI").unwrap_or("0".to_owned()) == "0" {
+        count += 1;
+    }
+    // if &env::var("CI").unwrap_or("0".to_owned()) == "0" {
         assert_eq!(cols, 90);
         assert_eq!(rows, 30);
-    }
+    // }
 }
 
 #[test]
