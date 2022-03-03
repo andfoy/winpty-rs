@@ -207,9 +207,9 @@ impl PTYImpl for ConPTY {
             CloseHandle(input_read_side);
             CloseHandle(output_write_side);
 
-            if env::var_os("CI").is_some() {
-                env::set_var("CONPTY_CI", "1");
-            }
+            // if env::var_os("CI").is_some() {
+            //     env::set_var("CONPTY_CI", "1");
+            // }
 
             let pty_process = PTYProcess::new(input_write_side, output_read_side, true);
 
