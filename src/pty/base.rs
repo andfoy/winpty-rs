@@ -9,7 +9,6 @@ use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP
 use windows::core::{HRESULT, Error};
 
 use std::ptr;
-use std::env;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;

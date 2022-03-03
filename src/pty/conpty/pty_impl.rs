@@ -23,7 +23,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 use windows::core::{HRESULT, Error};
 
-use std::{mem, env, ptr};
+use std::{mem, ptr};
 use std::mem::MaybeUninit;
 use std::ffi::OsString;
 use std::os::windows::prelude::*;
