@@ -217,7 +217,7 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 
 fn is_alive(process: HANDLE) -> Result<bool, OsString> {
     unsafe {
-        let is_timeout = WaitForSingleObject(process, 100);
+        let is_timeout = WaitForSingleObject(process, 0);
         let succ = is_timeout != WAIT_FAILED;
 
         if succ {
