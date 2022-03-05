@@ -1,10 +1,10 @@
 /// Base struct used to generalize some of the PTY I/O operations.
 
-use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, PSTR, PWSTR};
+use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, PSTR, PWSTR, WAIT_FAILED, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{GetFileSizeEx, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::PeekNamedPipe;
 use windows::Win32::System::IO::{OVERLAPPED, CancelIoEx};
-use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId};
+use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject};
 use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8};
 use windows::core::{HRESULT, Error};
 
@@ -215,7 +215,25 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
     Ok(os_str)
 }
 
-fn is_alive(process: HANDLE) -> Result<(bool, Option<u32>), OsString> {
+fn is_alive(process: HANDLE) -> Result<bool, OsString> {
+    unsafe {
+        let is_timeout = WaitForSingleObject(process, 100);
+        let succ = is_timeout != WAIT_FAILED;
+
+        if succ {
+            let alive = is_timeout == WAIT_TIMEOUT;
+            Ok(alive)
+        } else {
+            let err: HRESULT = Error::from_win32().into();
+            let result_msg = err.message();
+            let err_msg: &[u16] = result_msg.as_wide();
+            let string = OsString::from_wide(err_msg);
+            Err(string)
+        }
+    }
+}
+
+fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
     let mut exit = MaybeUninit::<u32>::uninit();
     unsafe {
         let exit_ptr: *mut u32 = ptr::addr_of_mut!(*exit.as_mut_ptr());
@@ -229,7 +247,7 @@ fn is_alive(process: HANDLE) -> Result<(bool, Option<u32>), OsString> {
             if !alive {
                 exitstatus = Some(actual_exit);
             }
-            Ok((alive, exitstatus))
+            Ok(exitstatus)
         } else {
             let err: HRESULT = Error::from_win32().into();
             let result_msg = err.message();
@@ -251,7 +269,7 @@ fn is_eof(process: HANDLE, stream: HANDLE) -> Result<bool, OsString> {
         let total_bytes = bytes.assume_init();
         if succ {
             match is_alive(process) {
-                Ok((alive, _)) => {
+                Ok(alive) => {
                     let eof = !alive && total_bytes == 0;
                     Ok(eof)
                 },
@@ -524,9 +542,8 @@ impl PTYProcess {
             return Ok(None);
         }
 
-        match is_alive(self.process) {
-            Ok((true, _)) => Ok(None),
-            Ok((false, exitstatus)) => Ok(exitstatus),
+        match get_exitstatus(self.process) {
+            Ok(exitstatus) => Ok(exitstatus),
             Err(err) => Err(err)
         }
     }
@@ -536,7 +553,7 @@ impl PTYProcess {
         // let mut exit_code: Box<u32> = Box::new_uninit();
         // let exit_ptr: *mut u32 = &mut *exit_code;
         match is_alive(self.process) {
-            Ok((alive, _)) => {
+            Ok(alive) => {
                 Ok(alive)
             },
             Err(err) => Err(err)
