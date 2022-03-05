@@ -1,3 +1,18 @@
+## Version 0.3.5 (2022/03/04)
+
+### Issues Closed
+
+* [Issue 27](https://github.com/andfoy/winpty-rs/issues/27) - Release v0.3.5
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 26](https://github.com/andfoy/winpty-rs/pull/26) - PR: Use WaitForSingleObject instead of GetExitCodeProcess to determine if the PTY process ended, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.3.4 (2022/03/03)
 
 ### Issues Closed
