@@ -1,0 +1,13 @@
+## Version 0.3.6 (2022/03/04)
+
+### Issues Closed
+
+* [Issue 29](https://github.com/andfoy/winpty-rs/issues/29) - Release v0.3.6
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 28](https://github.com/andfoy/winpty-rs/pull/28) - PR: Let WaitForSingleObject return immediately, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
