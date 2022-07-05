@@ -1,12 +1,13 @@
 /// Actual ConPTY implementation.
 
+use windows::core::{PWSTR, PCWSTR, Error};
 use windows::Win32::Foundation::{
-    CloseHandle, PWSTR, HANDLE,
+    CloseHandle, HANDLE,
     S_OK, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_GENERIC_READ, FILE_SHARE_READ,
     FILE_SHARE_WRITE, OPEN_EXISTING, FILE_GENERIC_WRITE,
-    FILE_ATTRIBUTE_NORMAL};
+    FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES};
 use windows::Win32::System::Console::{
     HPCON, AllocConsole, GetConsoleWindow,
     GetConsoleMode, CONSOLE_MODE, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
@@ -21,7 +22,7 @@ use windows::Win32::System::Threading::{
     EXTENDED_STARTUPINFO_PRESENT, CREATE_UNICODE_ENVIRONMENT,
     DeleteProcThreadAttributeList};
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-use windows::core::{HRESULT, Error};
+use windows::core::{HRESULT};
 
 use std::{mem, ptr};
 use std::mem::MaybeUninit;
@@ -47,7 +48,7 @@ unsafe impl Sync for ConPTY {}
 
 impl PTYImpl for ConPTY {
     fn new(args: &PTYArgs) -> Result<Box<dyn PTYImpl>, OsString> {
-        let mut result: HRESULT = S_OK;
+        let mut result: HRESULT;
         if args.cols <= 0 || args.rows <= 0 {
             let err: OsString = OsString::from(format!(
                 "PTY cols and rows must be positive and non-zero. Got: ({}, {})", args.cols, args.rows));
@@ -64,45 +65,42 @@ impl PTYImpl for ConPTY {
             // Recreate the standard stream inputs in case the parent process
             // has redirected them.
             let conout_name = OsString::from("CONOUT$\0");
-            let mut conout_vec: Vec<u16> = conout_name.encode_wide().collect();
-            let conout_pwstr = PWSTR(conout_vec.as_mut_ptr());
+            let conout_vec: Vec<u16> = conout_name.encode_wide().collect();
+            let conout_pwstr = PCWSTR(conout_vec.as_ptr());
 
-            let h_console = CreateFileW(
+            let h_console_res = CreateFileW(
                 conout_pwstr, FILE_GENERIC_READ | FILE_GENERIC_WRITE,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 ptr::null(), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, HANDLE(0));
 
-            if h_console.is_invalid() {
-                result = Error::from_win32().into();
-            }
-
-            if result.is_err() {
-                let result_msg = result.message();
+            if let Err(err) = h_console_res {
+                let result_msg = err.message();
                 let err_msg: &[u16] = result_msg.as_wide();
                 let string = OsString::from_wide(err_msg);
                 return Err(string);
             }
 
-            let conin_name = OsString::from("CONIN$\0");
-            let mut conin_vec: Vec<u16> = conin_name.encode_wide().collect();
-            let conin_pwstr = PWSTR(conin_vec.as_mut_ptr());
+            let h_console = h_console_res.unwrap();
 
-            let h_in = CreateFileW(
+            let conin_name = OsString::from("CONIN$\0");
+            let conin_vec: Vec<u16> = conin_name.encode_wide().collect();
+            let conin_pwstr = PCWSTR(conin_vec.as_ptr());
+
+            let h_in_res = CreateFileW(
                 conin_pwstr,
                 FILE_GENERIC_READ | FILE_GENERIC_WRITE,
                 FILE_SHARE_READ, ptr::null(),
-                OPEN_EXISTING, 0, HANDLE(0));
+                OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0),
+                HANDLE(0));
 
-            if h_in.is_invalid() {
-                result = Error::from_win32().into();
-            }
-
-            if result.is_err() {
-                let result_msg = result.message();
+            if let Err(err) = h_in_res {
+                let result_msg = err.message();
                 let err_msg: &[u16] = result_msg.as_wide();
                 let string = OsString::from_wide(err_msg);
                 return Err(string);
             }
+
+            let h_in = h_in_res.unwrap();
 
             let mut console_mode_un = MaybeUninit::<CONSOLE_MODE>::uninit();
             let console_mode_ptr = console_mode_un.as_mut_ptr();
@@ -222,7 +220,7 @@ impl PTYImpl for ConPTY {
     fn spawn(&mut self, appname: OsString, cmdline: Option<OsString>, cwd: Option<OsString>, env: Option<OsString>) -> Result<bool, OsString> {
         let result: HRESULT;
         let mut environ: *const u16 = ptr::null();
-        let mut working_dir: *mut u16 = ptr::null_mut();
+        let mut working_dir: *const u16 = ptr::null_mut();
         let mut env_buf: Vec<u16>;
         let mut cwd_buf: Vec<u16>;
         let cmd_buf: Vec<u16>;
@@ -240,7 +238,7 @@ impl PTYImpl for ConPTY {
         if let Some(cwd_opt) = cwd {
             cwd_buf = cwd_opt.encode_wide().collect();
             cwd_buf.push(0);
-            working_dir = cwd_buf.as_mut_ptr();
+            working_dir = cwd_buf.as_ptr();
         }
 
         if let Some(cmdline_opt) = cmdline {
@@ -256,12 +254,14 @@ impl PTYImpl for ConPTY {
             // Discover the size required for the list
             let mut required_bytes_u = MaybeUninit::<usize>::uninit();
             let required_bytes_ptr = required_bytes_u.as_mut_ptr();
-            InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, required_bytes_ptr);
+            InitializeProcThreadAttributeList(
+                LPPROC_THREAD_ATTRIBUTE_LIST(ptr::null_mut()), 1, 0, required_bytes_ptr);
 
             // Allocate memory to represent the list
             let mut required_bytes = required_bytes_u.assume_init();
             let mut lp_attribute_list: Box<[u8]> = vec![0; required_bytes].into_boxed_slice();
-            let proc_thread_list: LPPROC_THREAD_ATTRIBUTE_LIST = lp_attribute_list.as_mut_ptr().cast::<_>();
+            let proc_thread_list: LPPROC_THREAD_ATTRIBUTE_LIST = LPPROC_THREAD_ATTRIBUTE_LIST(
+                lp_attribute_list.as_mut_ptr().cast::<_>());
 
             // Prepare Startup Information structure
             let start_info = STARTUPINFOEXW {
@@ -284,7 +284,7 @@ impl PTYImpl for ConPTY {
             // Set the pseudoconsole information into the list
             if !UpdateProcThreadAttribute(
                     start_info.lpAttributeList, 0, 0x00020016,
-                    self.handle as _, mem::size_of::<HPCON>(),
+                    self.handle.0 as _, mem::size_of::<HPCON>(),
                     ptr::null_mut(), ptr::null_mut()).as_bool() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
@@ -298,14 +298,14 @@ impl PTYImpl for ConPTY {
             let si_ptr = &start_info as *const STARTUPINFOEXW;
 
             let succ = CreateProcessW(
-                PWSTR(ptr::null_mut()),
+                PCWSTR(ptr::null_mut()),
                 PWSTR(cmd),
                 ptr::null_mut(),
                 ptr::null_mut(),
                 false,
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
                 environ as _,
-                PWSTR(working_dir),
+                PCWSTR(working_dir),
                 si_ptr as *const _,
                 pi_ptr
             ).as_bool();

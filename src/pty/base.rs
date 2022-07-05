@@ -1,12 +1,12 @@
 /// Base struct used to generalize some of the PTY I/O operations.
 
-use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, PSTR, PWSTR, WAIT_FAILED, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, WAIT_FAILED, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{GetFileSizeEx, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::PeekNamedPipe;
 use windows::Win32::System::IO::{OVERLAPPED, CancelIoEx};
 use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject};
-use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8};
-use windows::core::{HRESULT, Error};
+use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS};
+use windows::core::{HRESULT, Error, PSTR, PCSTR};
 
 use std::ptr;
 use std::sync::mpsc;
@@ -193,11 +193,10 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 
     // let os_str = OsString::with_capacity(buf_vec.len());
     let mut vec_buf: Vec<u16> = std::iter::repeat(0).take(buf_vec.len()).collect();
-    let vec_ptr = vec_buf.as_mut_ptr();
-    let pstr = PSTR(buf_vec.as_mut_ptr());
-    let pwstr = PWSTR(vec_ptr);
+
     unsafe {
-        MultiByteToWideChar(CP_UTF8, 0, pstr, -1, pwstr, (total_bytes + 1) as i32);
+        MultiByteToWideChar(
+            CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0), &buf_vec[..], &mut vec_buf[..]);
     }
 
     // let non_zeros: Vec<u16> = vec_buf.split(|elem| *elem == 0 as u16).collect();
@@ -218,10 +217,10 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 fn is_alive(process: HANDLE) -> Result<bool, OsString> {
     unsafe {
         let is_timeout = WaitForSingleObject(process, 0);
-        let succ = is_timeout != WAIT_FAILED;
+        let succ = is_timeout != WAIT_FAILED.0;
 
         if succ {
-            let alive = is_timeout == WAIT_TIMEOUT;
+            let alive = is_timeout == WAIT_TIMEOUT.0;
             Ok(alive)
         } else {
             let err: HRESULT = Error::from_win32().into();
@@ -458,22 +457,24 @@ impl PTYProcess {
     /// The total number of characters written if the call was successful, else
     /// an [`OsString`] containing an human-readable error.
     pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
-        let mut vec_buf: Vec<u16> = buf.encode_wide().collect();
+        let vec_buf: Vec<u16> = buf.encode_wide().collect();
 
         let null_overlapped: *mut OVERLAPPED = ptr::null_mut();
         let result: HRESULT;
 
         unsafe {
-            let pwstr = PWSTR(vec_buf.as_mut_ptr());
             let required_size = WideCharToMultiByte(
-                CP_UTF8, 0, pwstr, vec_buf.len().try_into().map_err(|_| "buf too large")?, PSTR(ptr::null_mut::<u8>()),
-                0, PSTR(ptr::null_mut::<u8>()), ptr::null_mut::<i32>());
+                CP_UTF8, 0, &vec_buf[..], PSTR(ptr::null_mut::<u8>()),
+                0, PCSTR(ptr::null_mut::<u8>()), ptr::null_mut::<i32>());
 
             let mut bytes_buf: Vec<u8> = std::iter::repeat(0).take((required_size) as usize).collect();
             let bytes_buf_ptr = bytes_buf.as_mut_ptr();
             let pstr = PSTR(bytes_buf_ptr);
 
-            WideCharToMultiByte(CP_UTF8, 0, pwstr, vec_buf.len().try_into().unwrap(), pstr, required_size, PSTR(ptr::null_mut::<u8>()), ptr::null_mut::<i32>());
+            WideCharToMultiByte(
+                CP_UTF8, 0, &vec_buf[..], pstr,
+                required_size, PCSTR(ptr::null_mut::<u8>()),
+                ptr::null_mut::<i32>());
 
             let mut written_bytes = MaybeUninit::<u32>::uninit();
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*written_bytes.as_mut_ptr());

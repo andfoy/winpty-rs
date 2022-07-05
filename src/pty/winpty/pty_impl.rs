@@ -1,6 +1,7 @@
 /// Actual WinPTY backend implementation.
 
-use windows::Win32::Foundation::{PWSTR, HANDLE};
+use windows::Win32::Foundation::{HANDLE};
+use windows::core::{PCWSTR};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_GENERIC_READ, FILE_SHARE_NONE,
     OPEN_EXISTING, FILE_GENERIC_WRITE,
@@ -168,15 +169,32 @@ impl PTYImpl for WinPTY {
             let conout_name = pty_ptr.get_conout_name();
 
             let empty_handle = HANDLE(0);
-            let conin = CreateFileW(
-                PWSTR(conin_name as *mut u16), FILE_GENERIC_WRITE, FILE_SHARE_NONE, ptr::null(),
+            let conin_res = CreateFileW(
+                PCWSTR(conin_name as *const u16), FILE_GENERIC_WRITE, FILE_SHARE_NONE, ptr::null(),
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, empty_handle
             );
 
-            let conout = CreateFileW(
-                PWSTR(conout_name as *mut u16), FILE_GENERIC_READ, FILE_SHARE_NONE, ptr::null(),
+            if let Err(err) = conin_res {
+                let result_msg = err.message();
+                let err_msg: &[u16] = result_msg.as_wide();
+                let string = OsString::from_wide(err_msg);
+                return Err(string);
+            }
+
+            let conout_res = CreateFileW(
+                PCWSTR(conout_name as *mut u16), FILE_GENERIC_READ, FILE_SHARE_NONE, ptr::null(),
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, empty_handle
             );
+
+            if let Err(err) = conout_res {
+                let result_msg = err.message();
+                let err_msg: &[u16] = result_msg.as_wide();
+                let string = OsString::from_wide(err_msg);
+                return Err(string);
+            }
+
+            let conin = conin_res.unwrap();
+            let conout = conout_res.unwrap();
 
             let process = PTYProcess::new(conin, conout, false);
             Ok(Box::new(WinPTY { ptr: pty_ptr, process }) as Box<dyn PTYImpl>)
