@@ -1,5 +1,5 @@
 use windows::Win32::System::LibraryLoader::{GetProcAddress, GetModuleHandleW};
-use windows::Win32::Foundation::{PWSTR, PSTR};
+use windows::core::{PWSTR, PSTR, PCWSTR, PCSTR};
 use std::i64;
 use std::process::Command;
 use std::str;
@@ -11,6 +11,25 @@ trait IntoPWSTR {
 
 trait IntoPSTR {
     fn into_pstr(self) -> PSTR;
+}
+
+trait IntoPCSTR {
+    fn into_pcstr(self) -> PCSTR;
+}
+
+trait IntoPCWSTR {
+    fn into_pcwstr(self) -> PCWSTR;
+}
+
+impl IntoPCWSTR for &str {
+    fn into_pcwstr(self) -> PCWSTR {
+        let encoded = self
+            .encode_utf16()
+            .chain([0u16])
+            .collect::<Vec<u16>>();
+
+        PCWSTR(encoded.as_ptr())
+    }
 }
 
 impl IntoPWSTR for &str {
@@ -33,6 +52,18 @@ impl IntoPSTR for &str {
             .collect::<Vec<u8>>();
 
         PSTR(encoded.as_mut_ptr())    }
+}
+
+impl IntoPCSTR for &str {
+    fn into_pcstr(self) -> PCSTR {
+       let encoded = self
+           .as_bytes()
+           .iter()
+           .cloned()
+           .chain([0u8])
+           .collect::<Vec<u8>>();
+
+       PCSTR(encoded.as_ptr())    }
 }
 
 impl IntoPWSTR for String {
@@ -99,8 +130,10 @@ fn main() {
     println!("Windows build number: {:?}", build_version);
 
     let conpty_enabled;
-    let kernel32 = unsafe { GetModuleHandleW("kernel32.dll".into_pwstr()) };
-    let conpty = unsafe { GetProcAddress(kernel32, "CreatePseudoConsole".into_pstr()) };
+    let kernel32_res = unsafe { GetModuleHandleW("kernel32.dll".into_pcwstr()) };
+    let kernel32 = kernel32_res.unwrap();
+
+    let conpty = unsafe { GetProcAddress(kernel32, "CreatePseudoConsole".into_pcstr()) };
     match conpty {
         Some(_) => {
             conpty_enabled = "1";
