@@ -38,14 +38,14 @@ jobs:
               shell: bash -l {0}
               run: |
                 rustup component add llvm-tools-preview
-                echo "RUSTFLAGS=-Zinstrument-coverage" >> $GITHUB_ENV
+                echo "RUSTFLAGS=-Cinstrument-coverage" >> $GITHUB_ENV
             - name: Install miniconda
               uses: conda-incubator/setup-miniconda@v2
               with:
                 auto-update-conda: true
                 activate-environment: test
                 channels: conda-forge,defaults
-                python-version: 3.7
+                python-version: 3.9
             - name: Conda env info
               shell: bash -l {0}
               run: conda env list
