@@ -1,3 +1,14 @@
+## Version 0.3.8 (2022/07/21)
+
+
+### Pull Requests Merged
+
+* [PR 41](https://github.com/andfoy/winpty-rs/pull/41) - Make sure that the docs can be compiled from a non-Windows host machine, by [@andfoy](https://github.com/andfoy)
+* [PR 40](https://github.com/andfoy/winpty-rs/pull/40) - Update windows requirement from 0.38.0 to 0.39.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 2 pull requests were closed.
+
+
 ## Version 0.3.7 (2022/07/05)
 
 

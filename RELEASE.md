@@ -10,7 +10,7 @@ To release a new version of winpty-rs:
 8. git add -A && git commit -m "Release vX.X.X"
 9. git tag -a vX.X.X -m "Release vX.X.X"
 10. Update development version in ``Cargo.toml`` (add '-dev' and increment minor version)
-11. git add -A && git commit -m "Back to work"
+11. git add -A && git commit -m "Set development version to vY.Y.Y"
 12. git push upstream main
 13. git push upstream --tags
 14. Create release in GitHub
