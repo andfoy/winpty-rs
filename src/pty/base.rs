@@ -15,10 +15,32 @@ use std::time::Duration;
 use std::mem::MaybeUninit;
 use std::cmp::min;
 use std::ffi::{OsString, c_void};
+#[cfg(windows)]
 use std::os::windows::prelude::*;
+#[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
+#[cfg(unix)]
+use std::vec::IntoIter;
 
 use super::PTYArgs;
+
+#[cfg(unix)]
+trait OsStrExt {
+    fn from_wide(x: &[u16]) -> OsString;
+    fn encode_wide(&self) -> IntoIter<u16>;
+
+}
+
+#[cfg(unix)]
+impl OsStrExt for OsString {
+    fn from_wide(_: &[u16]) -> OsString {
+        return OsString::new();
+    }
+
+    fn encode_wide(&self) -> IntoIter<u16> {
+        return Vec::<u16>::new().into_iter();
+    }
+}
 
 /// This trait should be implemented by any backend that wants to provide a PTY implementation.
 pub trait PTYImpl: Sync + Send {
