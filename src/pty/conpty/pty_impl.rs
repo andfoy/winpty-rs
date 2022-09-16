@@ -71,7 +71,7 @@ impl PTYImpl for ConPTY {
             let h_console_res = CreateFileW(
                 conout_pwstr, FILE_GENERIC_READ | FILE_GENERIC_WRITE,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                ptr::null(), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, HANDLE(0));
+                None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, HANDLE(0));
 
             if let Err(err) = h_console_res {
                 let result_msg = err.message();
@@ -89,7 +89,7 @@ impl PTYImpl for ConPTY {
             let h_in_res = CreateFileW(
                 conin_pwstr,
                 FILE_GENERIC_READ | FILE_GENERIC_WRITE,
-                FILE_SHARE_READ, ptr::null(),
+                FILE_SHARE_READ, None,
                 OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0),
                 HANDLE(0));
 
@@ -103,10 +103,10 @@ impl PTYImpl for ConPTY {
             let h_in = h_in_res.unwrap();
 
             let mut console_mode_un = MaybeUninit::<CONSOLE_MODE>::uninit();
-            let console_mode_ptr = console_mode_un.as_mut_ptr();
+            let console_mode_ref = console_mode_un.as_mut_ptr();
 
             result =
-                if GetConsoleMode(h_console, console_mode_ptr).as_bool() {
+                if GetConsoleMode(h_console, console_mode_ref.as_mut().unwrap()).as_bool() {
                     S_OK
                 } else {
                     Error::from_win32().into()
@@ -175,7 +175,7 @@ impl PTYImpl for ConPTY {
             // Setup PTY size
             let size = COORD {X: args.cols as i16, Y: args.rows as i16};
 
-            if !CreatePipe(&mut input_read_side, &mut input_write_side, ptr::null(), 0).as_bool() {
+            if !CreatePipe(&mut input_read_side, &mut input_write_side, None, 0).as_bool() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
                 let err_msg: &[u16] = result_msg.as_wide();
@@ -183,7 +183,7 @@ impl PTYImpl for ConPTY {
                 return Err(string);
             }
 
-            if !CreatePipe(&mut output_read_side, &mut output_write_side, ptr::null(), 0).as_bool() {
+            if !CreatePipe(&mut output_read_side, &mut output_write_side, None, 0).as_bool() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
                 let err_msg: &[u16] = result_msg.as_wide();
@@ -255,7 +255,8 @@ impl PTYImpl for ConPTY {
             let mut required_bytes_u = MaybeUninit::<usize>::uninit();
             let required_bytes_ptr = required_bytes_u.as_mut_ptr();
             InitializeProcThreadAttributeList(
-                LPPROC_THREAD_ATTRIBUTE_LIST(ptr::null_mut()), 1, 0, required_bytes_ptr);
+                LPPROC_THREAD_ATTRIBUTE_LIST(ptr::null_mut()), 1, 0,
+                required_bytes_ptr.as_mut().unwrap());
 
             // Allocate memory to represent the list
             let mut required_bytes = required_bytes_u.assume_init();
@@ -285,7 +286,7 @@ impl PTYImpl for ConPTY {
             if !UpdateProcThreadAttribute(
                     start_info.lpAttributeList, 0, 0x00020016,
                     self.handle.0 as _, mem::size_of::<HPCON>(),
-                    ptr::null_mut(), ptr::null_mut()).as_bool() {
+                    ptr::null_mut(), None).as_bool() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
                 let err_msg: &[u16] = result_msg.as_wide();
@@ -296,18 +297,20 @@ impl PTYImpl for ConPTY {
             self.startup_info = start_info;
             let pi_ptr = &mut self.process_info as *mut _;
             let si_ptr = &start_info as *const STARTUPINFOEXW;
+            let si_ptr_addr = si_ptr as usize;
+            let si_w_ptr = si_ptr_addr as *const STARTUPINFOW;
 
             let succ = CreateProcessW(
                 PCWSTR(ptr::null_mut()),
                 PWSTR(cmd),
-                ptr::null_mut(),
-                ptr::null_mut(),
+                None,
+                None,
                 false,
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
                 environ as _,
                 PCWSTR(working_dir),
-                si_ptr as *const _,
-                pi_ptr
+                si_w_ptr.as_ref().unwrap(),
+                &mut self.process_info
             ).as_bool();
 
             if !succ {

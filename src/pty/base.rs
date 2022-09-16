@@ -129,13 +129,16 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
     if !blocking {
         if using_pipes {
             let mut bytes_u = MaybeUninit::<u32>::uninit();
-            let bytes_ptr = bytes_u.as_mut_ptr();
+
             //let mut available_bytes = Box::<>::new_uninit();
             //let bytes_ptr: *mut u32 = &mut *available_bytes;
             unsafe {
+                let bytes_ptr = ptr::addr_of_mut!(*bytes_u.as_mut_ptr());
+                let bytes_ref = bytes_ptr.as_mut().unwrap();
+
                 result =
-                    if PeekNamedPipe(stream, ptr::null_mut::<c_void>(), 0,
-                                     ptr::null_mut::<u32>(), bytes_ptr, ptr::null_mut::<u32>()).as_bool() {
+                    if PeekNamedPipe(stream, None,
+                                     None, Some(bytes_ref), None).as_bool() {
                         S_OK
                     } else {
                         Error::from_win32().into()
@@ -158,7 +161,9 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
             // let size_ptr: *mut i64 = ptr::null_mut();
             unsafe {
                 let size_ptr = ptr::addr_of_mut!(*size.as_mut_ptr());
-                result = if GetFileSizeEx(stream, size_ptr).as_bool() { S_OK } else { Error::from_win32().into() };
+                let size_ref = size_ptr.as_mut().unwrap();
+                // let size_ref = *size.as_mut_ptr();
+                result = if GetFileSizeEx(stream, size_ref).as_bool() { S_OK } else { Error::from_win32().into() };
 
                 if result.is_err() {
                     let result_msg = result.message();
@@ -190,10 +195,12 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                 _ => {
                     let buf_ptr = buf_vec.as_mut_ptr();
                     let buf_void = buf_ptr as *mut c_void;
+                    // let chars_read_ptr = chars_read.as_mut_ptr();
                     let chars_read_ptr = ptr::addr_of_mut!(*chars_read.as_mut_ptr());
+                    let chars_read_mut = chars_read_ptr.as_mut();
                     // println!("Blocked here");
                     result =
-                        if ReadFile(stream, buf_void, length, chars_read_ptr, null_overlapped).as_bool() {
+                        if ReadFile(stream, Some(&mut buf_vec[..]), chars_read_mut, None).as_bool() {
                             S_OK
                         } else {
                             Error::from_win32().into()
@@ -218,7 +225,8 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 
     unsafe {
         MultiByteToWideChar(
-            CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0), &buf_vec[..], &mut vec_buf[..]);
+            CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS(0), &buf_vec[..],
+            Some(&mut vec_buf[..]));
     }
 
     // let non_zeros: Vec<u16> = vec_buf.split(|elem| *elem == 0 as u16).collect();
@@ -239,10 +247,10 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 fn is_alive(process: HANDLE) -> Result<bool, OsString> {
     unsafe {
         let is_timeout = WaitForSingleObject(process, 0);
-        let succ = is_timeout != WAIT_FAILED.0;
+        let succ = is_timeout != WAIT_FAILED;
 
         if succ {
-            let alive = is_timeout == WAIT_TIMEOUT.0;
+            let alive = is_timeout == WAIT_TIMEOUT;
             Ok(alive)
         } else {
             let err: HRESULT = Error::from_win32().into();
@@ -258,7 +266,8 @@ fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
     let mut exit = MaybeUninit::<u32>::uninit();
     unsafe {
         let exit_ptr: *mut u32 = ptr::addr_of_mut!(*exit.as_mut_ptr());
-        let succ = GetExitCodeProcess(process, exit_ptr).as_bool();
+        let exit_ref = exit_ptr.as_mut().unwrap();
+        let succ = GetExitCodeProcess(process, exit_ref).as_bool();
 
         if succ {
             let actual_exit = *exit_ptr;
@@ -283,9 +292,9 @@ fn is_eof(process: HANDLE, stream: HANDLE) -> Result<bool, OsString> {
     let mut bytes = MaybeUninit::<u32>::uninit();
     unsafe {
         let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
+        let bytes_ref = bytes_ptr.as_mut();
         let succ = PeekNamedPipe(
-            stream, ptr::null_mut::<c_void>(), 0,
-            ptr::null_mut::<u32>(), bytes_ptr, ptr::null_mut::<u32>()).as_bool();
+            stream, None, None, bytes_ref, None).as_bool();
 
         let total_bytes = bytes.assume_init();
         if succ {
@@ -486,23 +495,24 @@ impl PTYProcess {
 
         unsafe {
             let required_size = WideCharToMultiByte(
-                CP_UTF8, 0, &vec_buf[..], PSTR(ptr::null_mut::<u8>()),
-                0, PCSTR(ptr::null_mut::<u8>()), ptr::null_mut::<i32>());
+                CP_UTF8, 0, &vec_buf[..], None,
+                PCSTR(ptr::null_mut::<u8>()), None);
 
             let mut bytes_buf: Vec<u8> = std::iter::repeat(0).take((required_size) as usize).collect();
             let bytes_buf_ptr = bytes_buf.as_mut_ptr();
             let pstr = PSTR(bytes_buf_ptr);
 
             WideCharToMultiByte(
-                CP_UTF8, 0, &vec_buf[..], pstr,
-                required_size, PCSTR(ptr::null_mut::<u8>()),
-                ptr::null_mut::<i32>());
+                CP_UTF8, 0, &vec_buf[..], Some(&mut bytes_buf[..]),
+                PCSTR(ptr::null_mut::<u8>()),
+                None);
 
             let mut written_bytes = MaybeUninit::<u32>::uninit();
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*written_bytes.as_mut_ptr());
+            let bytes_ref = bytes_ptr.as_mut();
 
             result =
-                if WriteFile(self.conin, bytes_buf[..].as_ptr() as *const c_void, bytes_buf.len() as u32, bytes_ptr, null_overlapped).as_bool() {
+                if WriteFile(self.conin, Some(&bytes_buf[..]), bytes_ref, None).as_bool() {
                     S_OK
                 } else {
                     Error::from_win32().into()
@@ -531,9 +541,9 @@ impl PTYProcess {
         let mut bytes = MaybeUninit::<u32>::uninit();
         unsafe {
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
+            let bytes_ref = bytes_ptr.as_mut();
             let mut succ = PeekNamedPipe(
-                self.conout, ptr::null_mut::<c_void>(), 0,
-                ptr::null_mut::<u32>(), bytes_ptr, ptr::null_mut::<u32>()).as_bool();
+                self.conout, None, None, bytes_ref, None).as_bool();
 
             let total_bytes = bytes.assume_init();
 
@@ -624,7 +634,7 @@ impl Drop for PTYProcess {
             if self.reader_process_out.send(None).is_ok() { }
 
             // Cancel all pending IO operations on conout
-            CancelIoEx(self.conout, ptr::null());
+            CancelIoEx(self.conout, None);
 
             // Send instruction to thread to finish
             if self.reader_alive.send(false).is_ok() { }
