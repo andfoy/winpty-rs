@@ -295,7 +295,6 @@ impl PTYImpl for ConPTY {
             }
 
             self.startup_info = start_info;
-            let pi_ptr = &mut self.process_info as *mut _;
             let si_ptr = &start_info as *const STARTUPINFOEXW;
             let si_ptr_addr = si_ptr as usize;
             let si_w_ptr = si_ptr_addr as *const STARTUPINFOW;

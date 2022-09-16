@@ -3,10 +3,10 @@
 use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, WAIT_FAILED, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{GetFileSizeEx, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::PeekNamedPipe;
-use windows::Win32::System::IO::{OVERLAPPED, CancelIoEx};
+use windows::Win32::System::IO::{CancelIoEx};
 use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject};
 use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS};
-use windows::core::{HRESULT, Error, PSTR, PCSTR};
+use windows::core::{HRESULT, Error, PCSTR};
 
 use std::ptr;
 use std::sync::mpsc;
@@ -14,7 +14,7 @@ use std::thread;
 use std::time::Duration;
 use std::mem::MaybeUninit;
 use std::cmp::min;
-use std::ffi::{OsString, c_void};
+use std::ffi::{OsString};
 #[cfg(windows)]
 use std::os::windows::prelude::*;
 #[cfg(windows)]
@@ -182,19 +182,15 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
     let os_str = "\0".repeat((length + 1) as usize);
     let mut buf_vec: Vec<u8> = os_str.as_str().as_bytes().to_vec();
     let mut chars_read = MaybeUninit::<u32>::uninit();
-    let total_bytes: u32;
     //let chars_read: *mut u32 = ptr::null_mut();
-    let null_overlapped: *mut OVERLAPPED = ptr::null_mut();
     // println!("Length: {}, {}", length, length > 0);
     // if length > 0 {
         unsafe {
             match length {
                 0 => {
-                    total_bytes = 0;
+                    ()
                 }
                 _ => {
-                    let buf_ptr = buf_vec.as_mut_ptr();
-                    let buf_void = buf_ptr as *mut c_void;
                     // let chars_read_ptr = chars_read.as_mut_ptr();
                     let chars_read_ptr = ptr::addr_of_mut!(*chars_read.as_mut_ptr());
                     let chars_read_mut = chars_read_ptr.as_mut();
@@ -206,8 +202,6 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                             Error::from_win32().into()
                         };
                     // println!("Unblocked here");
-                    total_bytes = *chars_read_ptr;
-                    chars_read.assume_init();
 
                     if result.is_err() {
                         let result_msg = result.message();
@@ -489,8 +483,6 @@ impl PTYProcess {
     /// an [`OsString`] containing an human-readable error.
     pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
         let vec_buf: Vec<u16> = buf.encode_wide().collect();
-
-        let null_overlapped: *mut OVERLAPPED = ptr::null_mut();
         let result: HRESULT;
 
         unsafe {
@@ -499,8 +491,6 @@ impl PTYProcess {
                 PCSTR(ptr::null_mut::<u8>()), None);
 
             let mut bytes_buf: Vec<u8> = std::iter::repeat(0).take((required_size) as usize).collect();
-            let bytes_buf_ptr = bytes_buf.as_mut_ptr();
-            let pstr = PSTR(bytes_buf_ptr);
 
             WideCharToMultiByte(
                 CP_UTF8, 0, &vec_buf[..], Some(&mut bytes_buf[..]),
