@@ -188,7 +188,7 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
         unsafe {
             match length {
                 0 => {
-                    ()
+
                 }
                 _ => {
                     // let chars_read_ptr = chars_read.as_mut_ptr();
