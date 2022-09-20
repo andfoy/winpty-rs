@@ -1,3 +1,18 @@
+## Version 0.3.9 (2022/09/20)
+
+### Issues Closed
+
+* [Issue 43](https://github.com/andfoy/winpty-rs/issues/43) - Release v0.3.9
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 42](https://github.com/andfoy/winpty-rs/pull/42) - Update windows requirement from 0.39.0 to 0.40.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.3.8 (2022/07/21)
 
 
