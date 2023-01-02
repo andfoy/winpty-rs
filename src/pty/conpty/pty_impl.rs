@@ -285,8 +285,8 @@ impl PTYImpl for ConPTY {
             // Set the pseudoconsole information into the list
             if !UpdateProcThreadAttribute(
                     start_info.lpAttributeList, 0, 0x00020016,
-                    self.handle.0 as _, mem::size_of::<HPCON>(),
-                    ptr::null_mut(), None).as_bool() {
+                    Some(self.handle.0 as _), mem::size_of::<HPCON>(),
+                    None, None).as_bool() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
                 let err_msg: &[u16] = result_msg.as_wide();
@@ -306,7 +306,7 @@ impl PTYImpl for ConPTY {
                 None,
                 false,
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-                environ as _,
+                Some(environ as _),
                 PCWSTR(working_dir),
                 si_w_ptr.as_ref().unwrap(),
                 &mut self.process_info
