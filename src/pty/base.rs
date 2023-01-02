@@ -291,7 +291,7 @@ fn is_eof(process: HANDLE, stream: HANDLE) -> Result<bool, OsString> {
         let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
         let bytes_ref = Some(bytes_ptr);
         let succ = PeekNamedPipe(
-            stream, None, 0, bytes_ref, None, None).as_bool();
+            stream, None, 0, None, bytes_ref, None).as_bool();
 
         let total_bytes = bytes.assume_init();
         if succ {
