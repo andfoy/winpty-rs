@@ -138,7 +138,8 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 
                 result =
                     if PeekNamedPipe(stream, None,
-                                     None, Some(bytes_ref), None).as_bool() {
+                                     0, Some(bytes_ref),
+                                     None, None).as_bool() {
                         S_OK
                     } else {
                         Error::from_win32().into()
@@ -193,10 +194,12 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                 _ => {
                     // let chars_read_ptr = chars_read.as_mut_ptr();
                     let chars_read_ptr = ptr::addr_of_mut!(*chars_read.as_mut_ptr());
-                    let chars_read_mut = chars_read_ptr.as_mut();
+                    // let chars_read_mut = chars_read_ptr.as_mut();
+                    let chars_read_mut = Some(chars_read_ptr);
                     // println!("Blocked here");
                     result =
-                        if ReadFile(stream, Some(&mut buf_vec[..]), chars_read_mut, None).as_bool() {
+                        if ReadFile(stream, Some(buf_vec.as_mut_ptr() as _),
+                                    length, chars_read_mut, None).as_bool() {
                             S_OK
                         } else {
                             Error::from_win32().into()
@@ -286,9 +289,9 @@ fn is_eof(process: HANDLE, stream: HANDLE) -> Result<bool, OsString> {
     let mut bytes = MaybeUninit::<u32>::uninit();
     unsafe {
         let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
-        let bytes_ref = bytes_ptr.as_mut();
+        let bytes_ref = Some(bytes_ptr);
         let succ = PeekNamedPipe(
-            stream, None, None, bytes_ref, None).as_bool();
+            stream, None, 0, bytes_ref, None, None).as_bool();
 
         let total_bytes = bytes.assume_init();
         if succ {
@@ -499,10 +502,11 @@ impl PTYProcess {
 
             let mut written_bytes = MaybeUninit::<u32>::uninit();
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*written_bytes.as_mut_ptr());
-            let bytes_ref = bytes_ptr.as_mut();
+            let bytes_ref = Some(bytes_ptr);
+            // let bytes_ref = bytes_ptr.as_mut();
 
             result =
-                if WriteFile(self.conin, Some(&bytes_buf[..]), bytes_ref, None).as_bool() {
+                if WriteFile(self.conin, Some(bytes_buf.as_ptr() as _), required_size.try_into().unwrap(), bytes_ref, None).as_bool() {
                     S_OK
                 } else {
                     Error::from_win32().into()
@@ -531,9 +535,9 @@ impl PTYProcess {
         let mut bytes = MaybeUninit::<u32>::uninit();
         unsafe {
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
-            let bytes_ref = bytes_ptr.as_mut();
+            let bytes_ref = Some(bytes_ptr);
             let mut succ = PeekNamedPipe(
-                self.conout, None, None, bytes_ref, None).as_bool();
+                self.conout, None, 0, bytes_ref, None, None).as_bool();
 
             let total_bytes = bytes.assume_init();
 
