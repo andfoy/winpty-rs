@@ -1,3 +1,13 @@
+## Version 0.3.11 (2023/01/02)
+
+
+### Pull Requests Merged
+
+* [PR 47](https://github.com/andfoy/winpty-rs/pull/47) - Prevent iseof from returning immediately, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.3.10 (2023/01/02)
 
 
