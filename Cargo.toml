@@ -13,7 +13,7 @@ keywords = ["windows", "pty", "winpty", "conpty", "pseudoterminal"]
 [dependencies]
 enum-primitive-derive = "0.2.2"
 num-traits = "0.2"
-bitflags = "1.3"
+bitflags = "2.3"
 
 [build-dependencies]
 which = "4.1.0"
