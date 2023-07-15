@@ -1,3 +1,14 @@
+## Version 0.3.12 (2023-07-15)
+
+
+### Pull Requests Merged
+
+* [PR 58](https://github.com/andfoy/winpty-rs/pull/58) - Update windows-rs to v0.48.0, by [@andfoy](https://github.com/andfoy) ([57](https://github.com/andfoy/winpty-rs/issues/57))
+* [PR 48](https://github.com/andfoy/winpty-rs/pull/48) - Update windows requirement from 0.43.0 to 0.44.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 2 pull requests were closed.
+
+
 ## Version 0.3.11 (2023/01/02)
 
 
