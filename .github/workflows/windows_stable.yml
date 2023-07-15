@@ -64,7 +64,7 @@ jobs:
               shell: bash -l {0}
               run: echo "LLVM_PROFILE_FILE=winpty_rs-%p-%m.profraw" >> $GITHUB_ENV
             - name: Cargo test
-              shell: bash -l {0}
+              # shell: bash -l {0}
               run: cargo test --features conpty --features winpty -- --test-threads=1
             - name: Gather test coverage
               if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}

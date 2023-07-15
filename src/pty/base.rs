@@ -506,7 +506,7 @@ impl PTYProcess {
             // let bytes_ref = bytes_ptr.as_mut();
 
             result =
-                if WriteFile(self.conin, Some(bytes_buf.as_ptr() as _), required_size.try_into().unwrap(), bytes_ref, None).as_bool() {
+                if WriteFile(self.conin, Some(&bytes_buf[..]), bytes_ref, None).as_bool() {
                     S_OK
                 } else {
                     Error::from_win32().into()

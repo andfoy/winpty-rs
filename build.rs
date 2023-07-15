@@ -1,7 +1,7 @@
 #[cfg(windows)]
 use windows::Win32::System::LibraryLoader::{GetProcAddress, GetModuleHandleW};
 #[cfg(windows)]
-use windows::core::{PWSTR, PSTR, PCWSTR, PCSTR};
+use windows::core::{PWSTR, PSTR, PCWSTR, PCSTR, HSTRING};
 use std::i64;
 use std::process::Command;
 use std::str;
@@ -144,10 +144,10 @@ fn main() {
         println!("Windows build number: {:?}", build_version);
 
         let conpty_enabled;
-        let kernel32_res = unsafe { GetModuleHandleW("kernel32.dll".into_pcwstr()) };
+        let kernel32_res = unsafe { GetModuleHandleW(&HSTRING::from("kernel32.dll")) };
         let kernel32 = kernel32_res.unwrap();
 
-        let conpty = unsafe { GetProcAddress(kernel32, "CreatePseudoConsole".into_pcstr()) };
+        let conpty = unsafe { GetProcAddress(kernel32,  "CreatePseudoConsole".into_pcstr()) };
         match conpty {
             Some(_) => {
                 conpty_enabled = "1";
