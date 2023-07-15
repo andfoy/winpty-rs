@@ -69,7 +69,7 @@ impl PTYImpl for ConPTY {
             let conout_pwstr = PCWSTR(conout_vec.as_ptr());
 
             let h_console_res = CreateFileW(
-                conout_pwstr, FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                conout_pwstr, (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, HANDLE(0));
 
@@ -88,7 +88,7 @@ impl PTYImpl for ConPTY {
 
             let h_in_res = CreateFileW(
                 conin_pwstr,
-                FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+                (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
                 FILE_SHARE_READ, None,
                 OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0),
                 HANDLE(0));
