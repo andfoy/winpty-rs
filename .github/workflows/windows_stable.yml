@@ -63,43 +63,43 @@ jobs:
               if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
               shell: bash -l {0}
               run: echo "LLVM_PROFILE_FILE=winpty_rs-%p-%m.profraw" >> $GITHUB_ENV
-            # - name: Cargo test
-            #   shell: bash -l {0}
-            #   run: cargo test --features conpty --features winpty -- --test-threads=1
-            # - name: Gather test coverage
-            #   if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
-            #   shell: bash -l {0}
-            #   run: |
-            #     grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
-            #     ls
-            # - name: Upload coverage results
-            #   uses: codecov/codecov-action@v3
-            #   with:
-            #     token: ${{ secrets.CODECOV_TOKEN }} # not required for public repos
-            #     files: ./lcov.info # optional
-            #     flags: unittests # optional
-            #     verbose: true # optional (default = false)
-            #     # fail_ci_if_error: true # optional (default = false)
-            #     # name: codecov-umbrella # optional
+            - name: Cargo test
+              # shell: bash -l {0}
+              run: cargo test --features conpty --features winpty -- --test-threads=1
+            - name: Gather test coverage
+              if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
+              shell: bash -l {0}
+              run: |
+                grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore "/*" -o lcov.info
+                ls
+            - name: Upload coverage results
+              uses: codecov/codecov-action@v3
+              with:
+                token: ${{ secrets.CODECOV_TOKEN }} # not required for public repos
+                files: ./lcov.info # optional
+                flags: unittests # optional
+                verbose: true # optional (default = false)
+                # fail_ci_if_error: true # optional (default = false)
+                # name: codecov-umbrella # optional
             # Enable this to get RDP access to the worker.
-            - name: Download
-              # if: ${{ failure() }}
-              run: Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-            - name: Extract
-              # if: ${{ failure() }}
-              run: Expand-Archive ngrok.zip
-            - name: Auth
-              # if: ${{ failure() }}
-              run: .\ngrok\ngrok.exe authtoken 1raaG4z7gsaCRlLw8cRkUWW6ItF_2LWTUFxXwd6UeeJNAAAci
-            - name: Enable TS
-              # if: ${{ failure() }}
-              run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-            - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-              # if: ${{ failure() }}
-            - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-              # if: ${{ failure() }}
-            - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-              # if: ${{ failure() }}
-            - name: Create Tunnel
-              # if: ${{ failure() }}
-              run: .\ngrok\ngrok.exe tcp 3389
+            # - name: Download
+            #   if: ${{ failure() }}
+            #   run: Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
+            # - name: Extract
+            #   if: ${{ failure() }}
+            #   run: Expand-Archive ngrok.zip
+            # - name: Auth
+            #   if: ${{ failure() }}
+            #   run: .\ngrok\ngrok.exe authtoken 1raaG4z7gsaCRlLw8cRkUWW6ItF_2LWTUFxXwd6UeeJNAAAci
+            # - name: Enable TS
+            #   if: ${{ failure() }}
+            #   run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+            # - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+            #   if: ${{ failure() }}
+            # - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+            #   if: ${{ failure() }}
+            # - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+            #   if: ${{ failure() }}
+            # - name: Create Tunnel
+            #   if: ${{ failure() }}
+            #   run: .\ngrok\ngrok.exe tcp 3389
