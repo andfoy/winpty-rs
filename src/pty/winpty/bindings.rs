@@ -45,11 +45,11 @@ extern "C" {
 
     /// Returns a textual representation of the error.  The string is freed when
     /// the error is freed.
-    pub fn winpty_error_msg(err: *mut winpty_error_ptr_t) -> *const u16;
+    pub fn winpty_error_msg(err: winpty_error_ptr_t) -> *const u16;
 
     /// Free the error object.  Every error returned from the winpty API must be
     /// freed.
-    pub fn winpty_error_free(err: *mut winpty_error_ptr_t);
+    pub fn winpty_error_free(err: winpty_error_ptr_t);
 }
 
 // Configuration of a new agent.
