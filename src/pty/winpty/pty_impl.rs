@@ -39,19 +39,8 @@ impl WinPTYPtr {
         unsafe { winpty_conout_name(self.ptr) }
     }
 
-<<<<<<< HEAD
     pub fn spawn(&self, appname: *const u16, cmdline: *const u16, cwd: *const u16, env: *const u16) -> Result<HANDLE, OsString> {
-        let mut err_ptr: *mut winpty_error_ptr_t = ptr::null_mut();
-=======
-    pub fn spawn(
-        &self,
-        appname: *const u16,
-        cmdline: *const u16,
-        cwd: *const u16,
-        env: *const u16,
-    ) -> Result<HANDLE, OsString> {
         let mut err_ptr: winpty_error_ptr_t = ptr::null_mut();
->>>>>>> e2079d1... fix: Make get_error_message works
         unsafe {
             let spawn_config = winpty_spawn_config_new(
                 3u64,
@@ -73,20 +62,10 @@ impl WinPTYPtr {
             let mut handle = ptr::addr_of_mut!((*handle_value.as_mut_ptr())) as *mut c_void;
             //let handle_value = process.0 as *mut c_void;
             //let process: *mut *mut  = ptr::null_mut();
-<<<<<<< HEAD
-            let succ = winpty_spawn(self.ptr, spawn_config, ptr::addr_of_mut!(handle), ptr::null_mut::<_>(),
-                                    ptr::null_mut::<u32>(), err_ptr);
-=======
             let mut os_error: u32 = 0;
-            let succ = winpty_spawn(
-                self.ptr,
-                spawn_config,
-                ptr::addr_of_mut!(handle),
-                ptr::null_mut::<_>(),
-                &mut os_error as *mut u32,
-                &mut err_ptr as *mut winpty_error_ptr_t,
-            );
->>>>>>> e2079d1... fix: Make get_error_message works
+            let succ = winpty_spawn(self.ptr, spawn_config, ptr::addr_of_mut!(handle), ptr::null_mut::<_>(),
+                                    &mut os_error as *mut u32,
+                                    &mut err_ptr as *mut winpty_error_ptr_t);
             winpty_spawn_config_free(spawn_config);
             if !succ {
                 let wide_buf = format!(" os error {}", os_error)
