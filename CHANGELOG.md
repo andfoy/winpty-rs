@@ -1,3 +1,15 @@
+## Version 0.3.13 (2023/10/06)
+
+
+### Pull Requests Merged
+
+* [PR 62](https://github.com/andfoy/winpty-rs/pull/62) - Bump actions/checkout from 3 to 4, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 61](https://github.com/andfoy/winpty-rs/pull/61) - Update windows requirement from 0.48.0 to 0.51.1, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 60](https://github.com/andfoy/winpty-rs/pull/60) - Fix error message returned by winpty is alway Success, by [@indirection42](https://github.com/indirection42)
+
+In this release 3 pull requests were closed.
+
+
 ## Version 0.3.12 (2023-07-15)
 
 
