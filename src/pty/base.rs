@@ -3,7 +3,7 @@
 use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, WAIT_FAILED, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{GetFileSizeEx, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::PeekNamedPipe;
-use windows::Win32::System::IO::{CancelIoEx};
+use windows::Win32::System::IO::CancelIoEx;
 use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject};
 use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS};
 use windows::core::{HRESULT, Error, PCSTR};
@@ -14,7 +14,7 @@ use std::thread;
 use std::time::Duration;
 use std::mem::MaybeUninit;
 use std::cmp::min;
-use std::ffi::{OsString};
+use std::ffi::OsString;
 #[cfg(windows)]
 use std::os::windows::prelude::*;
 #[cfg(windows)]
@@ -139,7 +139,7 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                 result =
                     if PeekNamedPipe(stream, None,
                                      0, Some(bytes_ref),
-                                     None, None).as_bool() {
+                                     None, None).is_ok() {
                         S_OK
                     } else {
                         Error::from_win32().into()
@@ -164,7 +164,7 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                 let size_ptr = ptr::addr_of_mut!(*size.as_mut_ptr());
                 let size_ref = size_ptr.as_mut().unwrap();
                 // let size_ref = *size.as_mut_ptr();
-                result = if GetFileSizeEx(stream, size_ref).as_bool() { S_OK } else { Error::from_win32().into() };
+                result = if GetFileSizeEx(stream, size_ref).is_ok() { S_OK } else { Error::from_win32().into() };
 
                 if result.is_err() {
                     let result_msg = result.message();
@@ -198,8 +198,8 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                     let chars_read_mut = Some(chars_read_ptr);
                     // println!("Blocked here");
                     result =
-                        if ReadFile(stream, Some(buf_vec.as_mut_ptr() as _),
-                                    length, chars_read_mut, None).as_bool() {
+                        if ReadFile(stream, Some(&mut buf_vec[..]),
+                                    chars_read_mut, None).is_ok() {
                             S_OK
                         } else {
                             Error::from_win32().into()
@@ -264,7 +264,7 @@ fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
     unsafe {
         let exit_ptr: *mut u32 = ptr::addr_of_mut!(*exit.as_mut_ptr());
         let exit_ref = exit_ptr.as_mut().unwrap();
-        let succ = GetExitCodeProcess(process, exit_ref).as_bool();
+        let succ = GetExitCodeProcess(process, exit_ref).is_ok();
 
         if succ {
             let actual_exit = *exit_ptr;
@@ -291,7 +291,7 @@ fn is_eof(process: HANDLE, stream: HANDLE) -> Result<bool, OsString> {
         let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
         let bytes_ref = Some(bytes_ptr);
         let succ = PeekNamedPipe(
-            stream, None, 0, None, bytes_ref, None).as_bool();
+            stream, None, 0, None, bytes_ref, None).is_ok();
 
         let total_bytes = bytes.assume_init();
         if succ {
@@ -506,7 +506,7 @@ impl PTYProcess {
             // let bytes_ref = bytes_ptr.as_mut();
 
             result =
-                if WriteFile(self.conin, Some(&bytes_buf[..]), bytes_ref, None).as_bool() {
+                if WriteFile(self.conin, Some(&bytes_buf[..]), bytes_ref, None).is_ok() {
                     S_OK
                 } else {
                     Error::from_win32().into()
@@ -537,7 +537,7 @@ impl PTYProcess {
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
             let bytes_ref = Some(bytes_ptr);
             let mut succ = PeekNamedPipe(
-                self.conout, None, 0, bytes_ref, None, None).as_bool();
+                self.conout, None, 0, bytes_ref, None, None).is_ok();
 
             let total_bytes = bytes.assume_init();
 
@@ -628,7 +628,7 @@ impl Drop for PTYProcess {
             if self.reader_process_out.send(None).is_ok() { }
 
             // Cancel all pending IO operations on conout
-            CancelIoEx(self.conout, None);
+            let _ = CancelIoEx(self.conout, None);
 
             // Send instruction to thread to finish
             if self.reader_alive.send(false).is_ok() { }
@@ -650,15 +650,15 @@ impl Drop for PTYProcess {
             }
 
             if !self.conin.is_invalid() {
-                CloseHandle(self.conin);
+                let _ = CloseHandle(self.conin);
             }
 
             if !self.conout.is_invalid() {
-                CloseHandle(self.conout);
+                let _ = CloseHandle(self.conout);
             }
 
             if self.close_process && !self.process.is_invalid() {
-                CloseHandle(self.process);
+                let _ = CloseHandle(self.process);
             }
         }
     }
