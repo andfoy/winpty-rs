@@ -16,7 +16,7 @@ num-traits = "0.2"
 bitflags = "2.3"
 
 [build-dependencies]
-which = "4.1.0"
+which = "5.0.0"
 
 [dependencies.windows]
 version = "0.51.1"
