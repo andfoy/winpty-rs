@@ -40,7 +40,7 @@ jobs:
                 rustup component add llvm-tools-preview
                 echo "RUSTFLAGS=-Cinstrument-coverage" >> $GITHUB_ENV
             - name: Install miniconda
-              uses: conda-incubator/setup-miniconda@v2
+              uses: conda-incubator/setup-miniconda@v3
               with:
                 auto-update-conda: true
                 activate-environment: test
