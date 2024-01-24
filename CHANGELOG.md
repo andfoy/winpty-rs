@@ -1,3 +1,16 @@
+## Version 0.3.14 (2024/01/23)
+
+
+### Pull Requests Merged
+
+* [PR 68](https://github.com/andfoy/winpty-rs/pull/68) - Update which requirement from 4.1.0 to 6.0.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 66](https://github.com/andfoy/winpty-rs/pull/66) - Bump conda-incubator/setup-miniconda from 2 to 3, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 65](https://github.com/andfoy/winpty-rs/pull/65) - Update enum-primitive-derive requirement from 0.2.2 to 0.3.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 64](https://github.com/andfoy/winpty-rs/pull/64) - Update windows requirement from 0.51.1 to 0.52.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 4 pull requests were closed.
+
+
 ## Version 0.3.13 (2023/10/06)
 
 
