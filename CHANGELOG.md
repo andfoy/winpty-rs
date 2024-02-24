@@ -1,3 +1,13 @@
+## Version 0.3.15 (2024/02/23)
+
+
+### Pull Requests Merged
+
+* [PR 70](https://github.com/andfoy/winpty-rs/pull/70) - Update windows requirement from 0.52.0 to 0.53.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.3.14 (2024/01/23)
 
 
