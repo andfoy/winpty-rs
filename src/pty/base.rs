@@ -148,8 +148,7 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 
                 if result.is_err() {
                     let result_msg = result.message();
-                    let err_msg: &[u16] = result_msg.as_wide();
-                    let string = OsString::from_wide(err_msg);
+                    let string = OsString::from(result_msg);
                     return Err(string);
                 }
                 let num_bytes = bytes_u.assume_init();
@@ -168,8 +167,7 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 
                 if result.is_err() {
                     let result_msg = result.message();
-                    let err_msg: &[u16] = result_msg.as_wide();
-                    let string = OsString::from_wide(err_msg);
+                    let string = OsString::from(result_msg);
                     return Err(string);
                 }
                 length = min(length, *size_ptr as u32);
@@ -208,8 +206,7 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
 
                     if result.is_err() {
                         let result_msg = result.message();
-                        let err_msg: &[u16] = result_msg.as_wide();
-                        let string = OsString::from_wide(err_msg);
+                        let string = OsString::from(result_msg);
                         return Err(string);
                     }
                 }
@@ -252,8 +249,7 @@ fn is_alive(process: HANDLE) -> Result<bool, OsString> {
         } else {
             let err: HRESULT = Error::from_win32().into();
             let result_msg = err.message();
-            let err_msg: &[u16] = result_msg.as_wide();
-            let string = OsString::from_wide(err_msg);
+            let string = OsString::from(result_msg);
             Err(string)
         }
     }
@@ -278,8 +274,7 @@ fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
         } else {
             let err: HRESULT = Error::from_win32().into();
             let result_msg = err.message();
-            let err_msg: &[u16] = result_msg.as_wide();
-            let string = OsString::from_wide(err_msg);
+            let string = OsString::from(result_msg);
             Err(string)
         }
     }
@@ -514,8 +509,7 @@ impl PTYProcess {
 
             if result.is_err() {
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
             let total_bytes = written_bytes.assume_init();
