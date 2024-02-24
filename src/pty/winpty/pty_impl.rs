@@ -203,8 +203,7 @@ impl PTYImpl for WinPTY {
 
             if let Err(err) = conin_res {
                 let result_msg = err.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -215,8 +214,7 @@ impl PTYImpl for WinPTY {
 
             if let Err(err) = conout_res {
                 let result_msg = err.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 

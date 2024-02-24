@@ -27,7 +27,6 @@ use windows::core::HRESULT;
 use std::{mem, ptr};
 use std::mem::MaybeUninit;
 use std::ffi::OsString;
-use std::os::windows::prelude::*;
 use std::os::windows::ffi::OsStrExt;
 
 use crate::pty::{PTYProcess, PTYImpl};
@@ -75,8 +74,7 @@ impl PTYImpl for ConPTY {
 
             if let Err(err) = h_console_res {
                 let result_msg = err.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -95,8 +93,7 @@ impl PTYImpl for ConPTY {
 
             if let Err(err) = h_in_res {
                 let result_msg = err.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -114,8 +111,7 @@ impl PTYImpl for ConPTY {
 
             if result.is_err() {
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -131,8 +127,7 @@ impl PTYImpl for ConPTY {
 
             if result.is_err() {
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -141,8 +136,7 @@ impl PTYImpl for ConPTY {
 
             if result.is_err() {
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -150,16 +144,14 @@ impl PTYImpl for ConPTY {
 
             if result.is_err() {
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
             result = if SetStdHandle(STD_INPUT_HANDLE, h_in).is_ok() {S_OK} else {Error::from_win32().into()};
             if result.is_err() {
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -178,16 +170,14 @@ impl PTYImpl for ConPTY {
             if !CreatePipe(&mut input_read_side, &mut input_write_side, None, 0).is_ok() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
             if !CreatePipe(&mut output_read_side, &mut output_write_side, None, 0).is_ok() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -196,8 +186,7 @@ impl PTYImpl for ConPTY {
                     Ok(pty) => pty,
                     Err(err) => {
                         let result_msg = err.message();
-                        let err_msg: &[u16] = result_msg.as_wide();
-                        let string = OsString::from_wide(err_msg);
+                        let string = OsString::from(result_msg);
                         return Err(string);
                     }
                 };
@@ -277,8 +266,7 @@ impl PTYImpl for ConPTY {
             if !InitializeProcThreadAttributeList(start_info.lpAttributeList, 1, 0, &mut required_bytes).is_ok() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -289,8 +277,7 @@ impl PTYImpl for ConPTY {
                     None, None).is_ok() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -315,8 +302,7 @@ impl PTYImpl for ConPTY {
             if !succ {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
-                let err_msg: &[u16] = result_msg.as_wide();
-                let string = OsString::from_wide(err_msg);
+                let string = OsString::from(result_msg);
                 return Err(string);
             }
 
@@ -338,8 +324,7 @@ impl PTYImpl for ConPTY {
                 Ok(_) => Ok(()),
                 Err(err) => {
                     let result_msg = err.message();
-                    let err_msg: &[u16] = result_msg.as_wide();
-                    let string = OsString::from_wide(err_msg);
+                    let string = OsString::from(result_msg);
                     Err(string)
                 }
             }
