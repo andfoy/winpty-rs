@@ -359,7 +359,7 @@ impl PTYProcess {
                 // let mut alive = reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true);
                 // alive = alive && !is_eof(process, conout).unwrap();
 
-                while reader_alive_rx.recv_timeout(Duration::from_millis(100)).unwrap_or(true) {
+                while reader_alive_rx.try_recv().unwrap_or(true) {
                     if !is_eof(process, conout).unwrap() {
                         let result = read(4096, true, conout, using_pipes);
                         reader_out_tx.send(Some(result)).unwrap();
@@ -378,7 +378,7 @@ impl PTYProcess {
 
         let cache_thread = thread::spawn(move || {
             let mut read_buf = OsString::new();
-            while cache_alive_rx.recv_timeout(Duration::from_millis(100)).unwrap_or(true) {
+            while cache_alive_rx.try_recv().unwrap_or(true) {
                 if let Ok(Some((length, blocking))) = cache_req_rx.recv() {
                     let mut pending_read: Option<OsString> = None;
 
