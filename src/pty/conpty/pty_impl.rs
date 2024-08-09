@@ -58,7 +58,7 @@ impl PTYImpl for ConPTY {
             // Create a console window in case ConPTY is running in a GUI application.
             let console_allocated = AllocConsole().is_ok();
             if console_allocated {
-                ShowWindow(GetConsoleWindow(), SW_HIDE);
+                let _ = ShowWindow(GetConsoleWindow(), SW_HIDE).unwrap();
             }
 
             // Recreate the standard stream inputs in case the parent process
@@ -70,7 +70,7 @@ impl PTYImpl for ConPTY {
             let h_console_res = CreateFileW(
                 conout_pwstr, (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, HANDLE(0));
+                None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, HANDLE(std::ptr::null_mut()));
 
             if let Err(err) = h_console_res {
                 let result_msg = err.message();
@@ -89,7 +89,7 @@ impl PTYImpl for ConPTY {
                 (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
                 FILE_SHARE_READ, None,
                 OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0),
-                HANDLE(0));
+                HANDLE(std::ptr::null_mut()));
 
             if let Err(err) = h_in_res {
                 let result_msg = err.message();
@@ -194,7 +194,7 @@ impl PTYImpl for ConPTY {
             let _ = CloseHandle(input_read_side);
             let _ = CloseHandle(output_write_side);
 
-            let pty_process = PTYProcess::new(input_write_side, output_read_side, true);
+            let pty_process = PTYProcess::new(input_write_side.into(), output_read_side.into(), true);
 
             Ok(Box::new(ConPTY {
                 handle: pty_handle,

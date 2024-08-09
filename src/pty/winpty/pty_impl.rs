@@ -78,7 +78,7 @@ impl WinPTYPtr {
             }
 
             handle_value.assume_init();
-            let process = HANDLE(handle as isize);
+            let process = HANDLE(handle);
             Ok(process)
         }
     }
@@ -195,7 +195,7 @@ impl PTYImpl for WinPTY {
             let conin_name = pty_ptr.get_conin_name();
             let conout_name = pty_ptr.get_conout_name();
 
-            let empty_handle = HANDLE(0);
+            let empty_handle = HANDLE(ptr::null_mut());
             let conin_res = CreateFileW(
                 PCWSTR(conin_name as *const u16), FILE_GENERIC_WRITE.0, FILE_SHARE_NONE, None,
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, empty_handle
@@ -221,7 +221,7 @@ impl PTYImpl for WinPTY {
             let conin = conin_res.unwrap();
             let conout = conout_res.unwrap();
 
-            let process = PTYProcess::new(conin, conout, false);
+            let process = PTYProcess::new(conin.into(), conout.into(), false);
             Ok(Box::new(WinPTY { ptr: pty_ptr, process }) as Box<dyn PTYImpl>)
         }
     }

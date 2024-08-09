@@ -15,6 +15,8 @@ use std::time::Duration;
 use std::mem::MaybeUninit;
 use std::cmp::min;
 use std::ffi::OsString;
+use core::ffi::c_void;
+
 #[cfg(windows)]
 use std::os::windows::prelude::*;
 #[cfg(windows)]
@@ -41,6 +43,33 @@ impl OsStrExt for OsString {
         return Vec::<u16>::new().into_iter();
     }
 }
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LocalHandle(pub *mut c_void);
+
+impl LocalHandle {
+    pub fn is_invalid(&self) -> bool {
+        self.0 == -1 as _ || self.0 == 0 as _
+    }
+}
+
+unsafe impl Send for LocalHandle {}
+unsafe impl Sync for LocalHandle {}
+
+
+impl From<HANDLE> for LocalHandle {
+    fn from(value: HANDLE) -> Self {
+        Self(value.0)
+    }
+}
+
+impl From<LocalHandle> for HANDLE {
+    fn from(value: LocalHandle) -> Self {
+        Self(value.0)
+    }
+}
+
 
 /// This trait should be implemented by any backend that wants to provide a PTY implementation.
 pub trait PTYImpl: Sync + Send {
@@ -307,11 +336,11 @@ fn is_eof(process: HANDLE, stream: HANDLE) -> Result<bool, OsString> {
 /// the lifetime of a process running inside a PTY.
 pub struct PTYProcess {
     /// Handle to the process to read from.
-    process: HANDLE,
+    process: LocalHandle,
     /// Handle to the standard input stream.
-    conin: HANDLE,
+    conin: LocalHandle,
     /// Handle to the standard output stream.
-    conout: HANDLE,
+    conout: LocalHandle,
     /// Identifier of the process running inside the PTY.
     pid: u32,
     /// Close process when the struct is dropped.
@@ -321,7 +350,7 @@ pub struct PTYProcess {
     /// Channel used to keep the thread alive.
     reader_alive: mpsc::Sender<bool>,
     /// Channel used to send the process handle to the reading thread.
-    reader_process_out: mpsc::Sender<Option<HANDLE>>,
+    reader_process_out: mpsc::Sender<Option<LocalHandle>>,
     /// Handle to the thread used to cache read output.
     cache_thread: Option<thread::JoinHandle<()>>,
     /// Channel used to submit a retrieval request to the cache.
@@ -342,11 +371,11 @@ impl PTYProcess {
     ///
     /// # Returns
     /// * `pty` - A new [`PTYProcess`] instance.
-    pub fn new(conin: HANDLE, conout: HANDLE, using_pipes: bool) -> PTYProcess {
+    pub fn new(conin: LocalHandle, conout: LocalHandle, using_pipes: bool) -> PTYProcess {
         // Continuous reading thread channels
         let (reader_out_tx, reader_out_rx) = mpsc::channel::<Option<Result<OsString, OsString>>>();
         let (reader_alive_tx, reader_alive_rx) = mpsc::channel::<bool>();
-        let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<HANDLE>>();
+        let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<LocalHandle>>();
 
         // Reading cache thread channels
         let (cache_alive_tx, cache_alive_rx) = mpsc::channel::<bool>();
@@ -360,8 +389,8 @@ impl PTYProcess {
                 // alive = alive && !is_eof(process, conout).unwrap();
 
                 while reader_alive_rx.try_recv().unwrap_or(true) {
-                    if !is_eof(process, conout).unwrap() {
-                        let result = read(4096, true, conout, using_pipes);
+                    if !is_eof(process.into(), conout.into()).unwrap() {
+                        let result = read(4096, true, conout.into(), using_pipes);
                         reader_out_tx.send(Some(result)).unwrap();
                     } else {
                         reader_out_tx.send(None).unwrap();
@@ -430,7 +459,7 @@ impl PTYProcess {
         });
 
         PTYProcess {
-            process: HANDLE(0),
+            process: LocalHandle(std::ptr::null_mut()),
             conin,
             conout,
             pid: 0,
@@ -501,7 +530,7 @@ impl PTYProcess {
             // let bytes_ref = bytes_ptr.as_mut();
 
             result =
-                if WriteFile(self.conin, Some(&bytes_buf[..]), bytes_ref, None).is_ok() {
+                if WriteFile(Into::<HANDLE>::into(self.conin), Some(&bytes_buf[..]), bytes_ref, None).is_ok() {
                     S_OK
                 } else {
                     Error::from_win32().into()
@@ -531,7 +560,7 @@ impl PTYProcess {
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
             let bytes_ref = Some(bytes_ptr);
             let mut succ = PeekNamedPipe(
-                self.conout, None, 0, bytes_ref, None, None).is_ok();
+                Into::<HANDLE>::into(self.conout), None, 0, bytes_ref, None, None).is_ok();
 
             let total_bytes = bytes.assume_init();
 
@@ -563,7 +592,7 @@ impl PTYProcess {
             return Ok(None);
         }
 
-        match get_exitstatus(self.process) {
+        match get_exitstatus(self.process.into()) {
             Ok(exitstatus) => Ok(exitstatus),
             Err(err) => Err(err)
         }
@@ -573,7 +602,7 @@ impl PTYProcess {
     pub fn is_alive(&self) -> Result<bool, OsString> {
         // let mut exit_code: Box<u32> = Box::new_uninit();
         // let exit_ptr: *mut u32 = &mut *exit_code;
-        match is_alive(self.process) {
+        match is_alive(self.process.into()) {
             Ok(alive) => {
                 Ok(alive)
             },
@@ -583,7 +612,7 @@ impl PTYProcess {
 
     /// Set the running process behind the PTY.
     pub fn set_process(&mut self, process: HANDLE, close_process: bool) {
-        self.process = process;
+        self.process = process.into();
         self.close_process = close_process;
 
         // if env::var_os("CONPTY_CI").is_some() {
@@ -597,9 +626,9 @@ impl PTYProcess {
         //     res.unwrap();
         // }
 
-        self.reader_process_out.send(Some(process)).unwrap();
+        self.reader_process_out.send(Some(process.into())).unwrap();
         unsafe {
-            self.pid = GetProcessId(self.process);
+            self.pid = GetProcessId(Into::<HANDLE>::into(self.process));
         }
     }
 
@@ -610,7 +639,7 @@ impl PTYProcess {
 
     /// Retrieve the process handle ID of the spawned program.
 	pub fn get_fd(&self) -> isize {
-        self.process.0
+        self.process.0 as isize
     }
 
 }
@@ -622,7 +651,7 @@ impl Drop for PTYProcess {
             if self.reader_process_out.send(None).is_ok() { }
 
             // Cancel all pending IO operations on conout
-            let _ = CancelIoEx(self.conout, None);
+            let _ = CancelIoEx(Into::<HANDLE>::into(self.conout), None);
 
             // Send instruction to thread to finish
             if self.reader_alive.send(false).is_ok() { }
@@ -644,15 +673,15 @@ impl Drop for PTYProcess {
             }
 
             if !self.conin.is_invalid() {
-                let _ = CloseHandle(self.conin);
+                let _ = CloseHandle(Into::<HANDLE>::into(self.conin));
             }
 
             if !self.conout.is_invalid() {
-                let _ = CloseHandle(self.conout);
+                let _ = CloseHandle(Into::<HANDLE>::into(self.conout));
             }
 
             if self.close_process && !self.process.is_invalid() {
-                let _ = CloseHandle(self.process);
+                let _ = CloseHandle(Into::<HANDLE>::into(self.process));
             }
         }
     }
