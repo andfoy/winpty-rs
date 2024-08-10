@@ -1,3 +1,17 @@
+## Version 0.3.16 (2024/08/09)
+
+
+### Pull Requests Merged
+
+* [PR 77](https://github.com/andfoy/winpty-rs/pull/77) - Update windows requirement from 0.57.0 to 0.58.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 76](https://github.com/andfoy/winpty-rs/pull/76) - fix: remove 100ms delay on first and subsequent read calls, by [@SilverMira](https://github.com/SilverMira) ([75](https://github.com/andfoy/winpty-rs/issues/75))
+* [PR 74](https://github.com/andfoy/winpty-rs/pull/74) - Update windows requirement from 0.56.0 to 0.57.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 73](https://github.com/andfoy/winpty-rs/pull/73) - Update windows requirement from 0.54.0 to 0.56.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 71](https://github.com/andfoy/winpty-rs/pull/71) - Update windows requirement from 0.53.0 to 0.54.0, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 5 pull requests were closed.
+
+
 ## Version 0.3.15 (2024/02/23)
 
 
