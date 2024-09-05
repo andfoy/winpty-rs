@@ -28,7 +28,7 @@ In order to use Rust in your library/program, you need to add `winpty-rs` to you
 winpty-rs = "0.3"
 ```
 
-In order to enable winpty compatibility, you will need the winpty redistributable binaries available in your PATH.
+In order to enable winpty compatibility, you will need the winpty redistributable binaries available in your PATH and LIB.
 You can download them from the official [winpty repository releases](https://github.com/rprichard/winpty/releases/tag/0.4.3), or using any known package manager in Windows.
 
 ## Usage
