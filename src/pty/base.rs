@@ -153,7 +153,7 @@ pub trait PTYImpl: Sync + Send {
 	fn get_fd(&self) -> isize;
 
     /// Wait for the process to exit/finish.
-    fn wait_for_exit(&self) -> ();
+    fn wait_for_exit(&self);
 }
 
 
@@ -709,8 +709,8 @@ impl PTYProcess {
     }
 
     /// Wait for the process to exit
-    pub fn wait_for_exit(&self) -> () {
-        self.alive_resp.recv()
+    pub fn wait_for_exit(&self) {
+        self.alive_resp.recv().unwrap()
     }
 
 }

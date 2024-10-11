@@ -292,7 +292,7 @@ impl PTY {
 	}
 
 	/// Wait for the process to exit/finish.
-    pub fn wait_for_exit(&self) -> () {
+    pub fn wait_for_exit(&self) {
 		self.pty.wait_for_exit()
 	}
 }

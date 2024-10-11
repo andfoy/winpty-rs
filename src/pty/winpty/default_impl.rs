@@ -45,7 +45,7 @@ impl PTYImpl for WinPTY {
         -1
     }
 
-    fn wait_for_exit(&self) -> () {
+    fn wait_for_exit(&self) {
         ()
     }
 }

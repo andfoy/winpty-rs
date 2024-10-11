@@ -47,7 +47,7 @@ impl PTYImpl for ConPTY {
         -1
     }
 
-    fn wait_for_exit(&self) -> () {
+    fn wait_for_exit(&self) {
         ()
     }
 }

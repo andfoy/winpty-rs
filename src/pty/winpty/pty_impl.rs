@@ -307,7 +307,7 @@ impl PTYImpl for WinPTY {
         self.process.get_fd()
     }
 
-    fn wait_for_exit(&self) -> () {
+    fn wait_for_exit(&self) {
         self.process.wait_for_exit()
     }
 }
