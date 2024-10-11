@@ -559,6 +559,7 @@ impl PTYProcess {
         unsafe {
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
             let bytes_ref = Some(bytes_ptr);
+            let _ = CancelIoEx(Into::<HANDLE>::into(self.conout), None);
             let mut succ = PeekNamedPipe(
                 Into::<HANDLE>::into(self.conout), None, 0, bytes_ref, None, None).is_ok();
 
