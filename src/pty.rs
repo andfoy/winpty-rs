@@ -290,4 +290,9 @@ impl PTY {
 	pub fn get_fd(&self) -> isize {
 		self.pty.get_fd()
 	}
+
+	/// Wait for the process to exit/finish.
+    pub fn wait_for_exit(&self) -> () {
+		self.pty.wait_for_exit()
+	}
 }

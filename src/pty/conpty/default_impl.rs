@@ -46,4 +46,8 @@ impl PTYImpl for ConPTY {
     fn get_fd(&self) -> isize {
         -1
     }
+
+    fn wait_for_exit(&self) -> () {
+        ()
+    }
 }

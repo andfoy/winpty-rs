@@ -1,15 +1,16 @@
 /// Base struct used to generalize some of the PTY I/O operations.
 
-use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, WAIT_FAILED, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, STATUS_PENDING, S_OK, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{GetFileSizeEx, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::PeekNamedPipe;
 use windows::Win32::System::IO::CancelIoEx;
 use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject};
 use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS};
 use windows::core::{HRESULT, Error, PCSTR};
+use windows::Win32::System::Threading::INFINITE;
 
 use std::ptr;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::mem::MaybeUninit;
@@ -150,6 +151,9 @@ pub trait PTYImpl: Sync + Send {
 
     /// Retrieve the process handle ID of the spawned program.
 	fn get_fd(&self) -> isize;
+
+    /// Wait for the process to exit/finish.
+    fn wait_for_exit(&self) -> ();
 }
 
 
@@ -284,6 +288,23 @@ fn is_alive(process: HANDLE) -> Result<bool, OsString> {
     }
 }
 
+fn wait_for_exit(process: HANDLE) -> Result<bool, OsString> {
+    unsafe {
+        let wait_status = WaitForSingleObject(process, INFINITE);
+        let succ = wait_status != WAIT_FAILED;
+        if succ {
+            let dead = wait_status == WAIT_OBJECT_0;
+            Ok(dead)
+        } else {
+            let err: HRESULT = Error::from_win32().into();
+            let result_msg = err.message();
+            let string = OsString::from(result_msg);
+            Err(string)
+        }
+    }
+}
+
+
 fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
     let mut exit = MaybeUninit::<u32>::uninit();
     unsafe {
@@ -351,6 +372,14 @@ pub struct PTYProcess {
     reader_alive: mpsc::Sender<bool>,
     /// Channel used to send the process handle to the reading thread.
     reader_process_out: mpsc::Sender<Option<LocalHandle>>,
+    // Handle to the thread used to check if the process is still alive.
+    alive_thread: Option<thread::JoinHandle<()>>,
+    // Channel used to send the process handle to the process alive monitor
+    alive_process_out:  mpsc::Sender<Option<LocalHandle>>,
+    // Channel used to notify when the process has exited
+    alive_resp: mpsc::Receiver<()>,
+    // Channel used to keep the process alive checker alive.
+    alive_process_alive: mpsc::Sender<bool>,
     /// Handle to the thread used to cache read output.
     cache_thread: Option<thread::JoinHandle<()>>,
     /// Channel used to submit a retrieval request to the cache.
@@ -382,6 +411,36 @@ impl PTYProcess {
         let (cache_req_tx, cache_req_rx) = mpsc::channel::<Option<(u32, bool)>>();
         let (cache_resp_tx, cache_resp_rx) = mpsc::channel::<Result<OsString, OsString>>();
 
+        // Process alive monitoring
+        let (process_alive_tx, process_alive_rx) = mpsc::channel::<bool>();
+        let (alive_process_tx, alive_process_rx) = mpsc::channel::<Option<LocalHandle>>();
+        let (alive_out_tx, alive_out_rx) = mpsc::channel::<()>();
+
+        // Reading process mutex
+        let read_mutex = Arc::new(Mutex::new(false));
+        let mutex_copy = Arc::clone(&read_mutex);
+
+        let process_alive_thread = thread::spawn(move || {
+            let process_result = alive_process_rx.recv();
+            while process_alive_rx.try_recv().unwrap_or(true) {
+                if let Ok(Some(process)) = process_result {
+                    unsafe {
+                        if let Ok(dead) = wait_for_exit(process.into()) {
+                            alive_out_tx.send(());
+                            if mutex_copy.try_lock().is_err() && dead {
+                                // Cancel all remaining I/O operations
+                                let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
+                            }
+                        }
+                    };
+                }
+            }
+
+            drop(alive_out_tx);
+            drop(alive_process_rx);
+            drop(process_alive_rx);
+        });
+
         let reader_thread = thread::spawn(move || {
             let process_result = reader_process_rx.recv();
             if let Ok(Some(process)) = process_result {
@@ -390,7 +449,9 @@ impl PTYProcess {
 
                 while reader_alive_rx.try_recv().unwrap_or(true) {
                     if !is_eof(process.into(), conout.into()).unwrap() {
+                        let state = read_mutex.lock().unwrap();
                         let result = read(4096, true, conout.into(), using_pipes);
+                        drop(state);
                         reader_out_tx.send(Some(result)).unwrap();
                     } else {
                         reader_out_tx.send(None).unwrap();
@@ -467,6 +528,10 @@ impl PTYProcess {
             reading_thread: Some(reader_thread),
             reader_alive: reader_alive_tx,
             reader_process_out: reader_process_tx,
+            alive_thread: Some(process_alive_thread),
+            alive_process_out: alive_process_tx,
+            alive_process_alive: process_alive_tx,
+            alive_resp: alive_out_rx,
             cache_thread: Some(cache_thread),
             cache_req: cache_req_tx,
             cache_resp: cache_resp_rx,
@@ -559,7 +624,6 @@ impl PTYProcess {
         unsafe {
             let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
             let bytes_ref = Some(bytes_ptr);
-            let _ = CancelIoEx(Into::<HANDLE>::into(self.conout), None);
             let mut succ = PeekNamedPipe(
                 Into::<HANDLE>::into(self.conout), None, 0, bytes_ref, None, None).is_ok();
 
@@ -627,6 +691,7 @@ impl PTYProcess {
         //     res.unwrap();
         // }
 
+        self.alive_process_out.send(Some(process.into())).unwrap();
         self.reader_process_out.send(Some(process.into())).unwrap();
         unsafe {
             self.pid = GetProcessId(Into::<HANDLE>::into(self.process));
@@ -641,6 +706,11 @@ impl PTYProcess {
     /// Retrieve the process handle ID of the spawned program.
 	pub fn get_fd(&self) -> isize {
         self.process.0 as isize
+    }
+
+    /// Wait for the process to exit
+    pub fn wait_for_exit(&self) -> () {
+        self.alive_resp.recv()
     }
 
 }
@@ -671,6 +741,14 @@ impl Drop for PTYProcess {
             // Wait for the cache to be down
             if let Some(cache_handle) = self.cache_thread.take() {
                 cache_handle.join().unwrap();
+            }
+
+            // Send message to process alive checker to finish
+            if self.alive_process_alive.send(false).is_ok() {}
+
+            // Wait for the process alive checker to be down
+            if let Some(alive_handle) = self.alive_thread.take() {
+                alive_handle.join().unwrap();
             }
 
             if !self.conin.is_invalid() {
