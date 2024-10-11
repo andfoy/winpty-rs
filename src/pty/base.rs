@@ -426,7 +426,7 @@ impl PTYProcess {
                 if let Ok(Some(process)) = process_result {
                     unsafe {
                         if let Ok(dead) = wait_for_exit(process.into()) {
-                            alive_out_tx.send(());
+                            let _ = alive_out_tx.send(());
                             if mutex_copy.try_lock().is_err() && dead {
                                 // Cancel all remaining I/O operations
                                 let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
