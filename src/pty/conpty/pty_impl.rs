@@ -359,7 +359,7 @@ impl PTYImpl for ConPTY {
         self.process.get_fd()
     }
 
-    fn wait_for_exit(&self) {
+    fn wait_for_exit(&self) -> Result<bool, OsString> {
         self.process.wait_for_exit()
     }
 }

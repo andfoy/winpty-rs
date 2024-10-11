@@ -47,7 +47,7 @@ impl PTYImpl for ConPTY {
         -1
     }
 
-    fn wait_for_exit(&self) {
-        ()
+    fn wait_for_exit(&self) -> Result<bool, OsString> {
+        Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
 }
