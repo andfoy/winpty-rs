@@ -25,7 +25,7 @@ In order to use Rust in your library/program, you need to add `winpty-rs` to you
 
 ```toml
 [dependencies]
-winpty-rs = "0.3"
+winpty-rs = "0.4"
 ```
 
 In order to enable winpty compatibility, you will need the winpty redistributable binaries available in your PATH and LIB.
