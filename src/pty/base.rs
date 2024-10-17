@@ -1,12 +1,13 @@
 /// Base struct used to generalize some of the PTY I/O operations.
 
-use windows::Win32::Foundation::{HANDLE, S_OK, STATUS_PENDING, CloseHandle, WAIT_FAILED, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, STATUS_PENDING, S_OK, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{GetFileSizeEx, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::PeekNamedPipe;
 use windows::Win32::System::IO::CancelIoEx;
 use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject};
 use windows::Win32::Globalization::{MultiByteToWideChar, WideCharToMultiByte, CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS};
 use windows::core::{HRESULT, Error, PCSTR};
+use windows::Win32::System::Threading::INFINITE;
 
 use std::ptr;
 use std::sync::mpsc;
@@ -150,6 +151,9 @@ pub trait PTYImpl: Sync + Send {
 
     /// Retrieve the process handle ID of the spawned program.
 	fn get_fd(&self) -> isize;
+
+    /// Wait for the process to exit/finish.
+    fn wait_for_exit(&self) -> Result<bool, OsString>;
 }
 
 
@@ -284,6 +288,23 @@ fn is_alive(process: HANDLE) -> Result<bool, OsString> {
     }
 }
 
+fn wait_for_exit(process: HANDLE) -> Result<bool, OsString> {
+    unsafe {
+        let wait_status = WaitForSingleObject(process, INFINITE);
+        let succ = wait_status != WAIT_FAILED;
+        if succ {
+            let dead = wait_status == WAIT_OBJECT_0;
+            Ok(dead)
+        } else {
+            let err: HRESULT = Error::from_win32().into();
+            let result_msg = err.message();
+            let string = OsString::from(result_msg);
+            Err(string)
+        }
+    }
+}
+
+
 fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
     let mut exit = MaybeUninit::<u32>::uninit();
     unsafe {
@@ -388,7 +409,7 @@ impl PTYProcess {
                 // let mut alive = reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true);
                 // alive = alive && !is_eof(process, conout).unwrap();
 
-                while reader_alive_rx.try_recv().unwrap_or(true) {
+                while reader_alive_rx.recv_timeout(Duration::from_millis(100)).unwrap_or(true) {
                     if !is_eof(process.into(), conout.into()).unwrap() {
                         let result = read(4096, true, conout.into(), using_pipes);
                         reader_out_tx.send(Some(result)).unwrap();
@@ -640,6 +661,11 @@ impl PTYProcess {
     /// Retrieve the process handle ID of the spawned program.
 	pub fn get_fd(&self) -> isize {
         self.process.0 as isize
+    }
+
+    /// Wait for the process to exit
+    pub fn wait_for_exit(&self) -> Result<bool, OsString> {
+        wait_for_exit(self.process.into())
     }
 
 }

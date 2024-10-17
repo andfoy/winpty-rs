@@ -44,4 +44,8 @@ impl PTYImpl for WinPTY {
     fn get_fd(&self) -> isize {
         -1
     }
+
+    fn wait_for_exit(&self) -> Result<bool, OsString> {
+        Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
+    }
 }

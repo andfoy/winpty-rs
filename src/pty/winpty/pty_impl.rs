@@ -306,6 +306,10 @@ impl PTYImpl for WinPTY {
     fn get_fd(&self) -> isize {
         self.process.get_fd()
     }
+
+    fn wait_for_exit(&self) -> Result<bool, OsString> {
+        self.process.wait_for_exit()
+    }
 }
 
 unsafe impl Send for WinPTY {}

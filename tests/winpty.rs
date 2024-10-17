@@ -171,3 +171,29 @@ fn is_alive_exitstatus_winpty() {
     assert!(!pty.is_alive().unwrap());
     assert_eq!(pty.get_exitstatus().unwrap(), Some(0))
 }
+
+
+#[test]
+fn wait_for_exit() {
+    let pty_args = PTYArgs {
+        cols: 80,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES
+    };
+
+    let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+    pty.spawn(appname, None, None, None).unwrap();
+
+    pty.write("echo wait\r\n".into()).unwrap();
+    assert!(pty.is_alive().unwrap());
+    assert_eq!(pty.get_exitstatus().unwrap(), None);
+
+    pty.write("exit\r\n".into()).unwrap();
+    pty.wait_for_exit();
+
+    assert!(!pty.is_alive().unwrap());
+    assert_eq!(pty.get_exitstatus().unwrap(), Some(0))
+}
