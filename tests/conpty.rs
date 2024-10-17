@@ -209,7 +209,7 @@ fn wait_for_exit() {
     assert_eq!(pty.get_exitstatus().unwrap(), None);
 
     pty.write("exit\r\n".into()).unwrap();
-    pty.wait_for_exit();
+    let _ = pty.wait_for_exit();
 
     assert!(!pty.is_alive().unwrap());
     assert_eq!(pty.get_exitstatus().unwrap(), Some(0))

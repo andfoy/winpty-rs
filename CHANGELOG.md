@@ -1,3 +1,18 @@
+## Version 0.4.0 (2024/10/17)
+
+### Issues Closed
+
+* [Issue 72](https://github.com/andfoy/winpty-rs/issues/72) - FEATURE REQUEST: Callback or blocking method to wait for exit of spawned process ([PR 79](https://github.com/andfoy/winpty-rs/pull/79) by [@andfoy](https://github.com/andfoy))
+
+In this release 1 issue was closed.
+
+### Pull Requests Merged
+
+* [PR 79](https://github.com/andfoy/winpty-rs/pull/79) - Prevent reading thread from hanging if process has stopped, by [@andfoy](https://github.com/andfoy) ([72](https://github.com/andfoy/winpty-rs/issues/72))
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.3.16 (2024/08/09)
 
 
