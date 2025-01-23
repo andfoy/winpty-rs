@@ -428,13 +428,16 @@ impl PTYProcess {
 
         let cache_thread = thread::spawn(move || {
             let mut read_buf = OsString::new();
+            let mut eof_reached;
             while cache_alive_rx.try_recv().unwrap_or(true) {
                 if let Ok(Some((length, blocking))) = cache_req_rx.recv() {
                     let mut pending_read: Option<OsString> = None;
 
-                    if (length as usize) < read_buf.len() {
+                    if (length as usize) <= read_buf.len() {
                         pending_read = Some(OsString::new());
                     }
+
+                    eof_reached = false;
 
                     let out =
                         match pending_read {
@@ -443,14 +446,20 @@ impl PTYProcess {
                                 match blocking {
                                     true => {
                                         match reader_out_rx.recv() {
-                                            Ok(None) => Err(OsString::from("Standard out reached EOF")),
+                                            Ok(None) => {
+                                                eof_reached = true;
+                                                Ok(OsString::new())
+                                            }
                                             Ok(Some(bytes)) => bytes,
                                             Err(_) => Ok(OsString::new())
                                         }
                                     },
                                     false => {
                                         match reader_out_rx.recv_timeout(Duration::from_millis(200)) {
-                                            Ok(None) => Err(OsString::from("Standard out reached EOF")),
+                                            Ok(None) => {
+                                                eof_reached = true;
+                                                Ok(OsString::new())
+                                            }
                                             Ok(Some(bytes)) => bytes,
                                             Err(_) => Ok(OsString::new())
                                         }
@@ -467,7 +476,11 @@ impl PTYProcess {
                             let (left, right) = vec_buf.split_at(to_read);
                             let to_return = OsString::from_wide(left);
                             read_buf = OsString::from_wide(right);
-                            cache_resp_tx.send(Ok(to_return)).unwrap();
+                            if eof_reached && to_return.is_empty() && length != 0 {
+                                cache_resp_tx.send(Err(OsString::from("Standard out reached EOF"))).unwrap();
+                            } else {
+                                cache_resp_tx.send(Ok(to_return)).unwrap();
+                            }
                         },
                         Err(err) => { cache_resp_tx.send(Err(err)).unwrap(); }
                     }
