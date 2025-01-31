@@ -1,3 +1,14 @@
+## Version 0.4.1 (2025/01/31)
+
+
+### Pull Requests Merged
+
+* [PR 87](https://github.com/andfoy/winpty-rs/pull/87) -  Prevent PTY output truncation by correctly handling EOF in cache_thread, by [@andfoy](https://github.com/andfoy) ([85](https://github.com/andfoy/winpty-rs/issues/85), [84](https://github.com/andfoy/winpty-rs/issues/84))
+* [PR 86](https://github.com/andfoy/winpty-rs/pull/86) - Update windows-rs to v0.59.0, by [@andfoy](https://github.com/andfoy)
+
+In this release 2 pull requests were closed.
+
+
 ## Version 0.4.0 (2024/10/17)
 
 ### Issues Closed
