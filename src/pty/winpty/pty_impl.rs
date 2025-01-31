@@ -198,7 +198,7 @@ impl PTYImpl for WinPTY {
             let empty_handle = HANDLE(ptr::null_mut());
             let conin_res = CreateFileW(
                 PCWSTR(conin_name as *const u16), FILE_GENERIC_WRITE.0, FILE_SHARE_NONE, None,
-                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, empty_handle
+                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, Some(empty_handle)
             );
 
             if let Err(err) = conin_res {
@@ -209,7 +209,7 @@ impl PTYImpl for WinPTY {
 
             let conout_res = CreateFileW(
                 PCWSTR(conout_name as *mut u16), FILE_GENERIC_READ.0, FILE_SHARE_NONE, None,
-                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, empty_handle
+                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, Some(empty_handle)
             );
 
             if let Err(err) = conout_res {
