@@ -70,7 +70,7 @@ impl PTYImpl for ConPTY {
             let h_console_res = CreateFileW(
                 conout_pwstr, (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, HANDLE(std::ptr::null_mut()));
+                None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, Some(HANDLE(std::ptr::null_mut())));
 
             if let Err(err) = h_console_res {
                 let result_msg = err.message();
@@ -89,7 +89,7 @@ impl PTYImpl for ConPTY {
                 (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
                 FILE_SHARE_READ, None,
                 OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0),
-                HANDLE(std::ptr::null_mut()));
+                Some(HANDLE(std::ptr::null_mut())));
 
             if let Err(err) = h_in_res {
                 let result_msg = err.message();
@@ -244,7 +244,7 @@ impl PTYImpl for ConPTY {
             let mut required_bytes_u = MaybeUninit::<usize>::uninit();
             let required_bytes_ptr = required_bytes_u.as_mut_ptr();
             let _ = InitializeProcThreadAttributeList(
-                LPPROC_THREAD_ATTRIBUTE_LIST(ptr::null_mut()), 1, 0,
+                Some(LPPROC_THREAD_ATTRIBUTE_LIST(ptr::null_mut())), 1, Some(0),
                 required_bytes_ptr.as_mut().unwrap());
 
             // Allocate memory to represent the list
@@ -263,7 +263,7 @@ impl PTYImpl for ConPTY {
             };
 
             // Initialize the list memory location
-            if !InitializeProcThreadAttributeList(start_info.lpAttributeList, 1, 0, &mut required_bytes).is_ok() {
+            if !InitializeProcThreadAttributeList(Some(start_info.lpAttributeList), 1, Some(0), &mut required_bytes).is_ok() {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
@@ -288,7 +288,7 @@ impl PTYImpl for ConPTY {
 
             let succ = CreateProcessW(
                 PCWSTR(ptr::null_mut()),
-                PWSTR(cmd),
+                Some(PWSTR(cmd)),
                 None,
                 None,
                 false,
