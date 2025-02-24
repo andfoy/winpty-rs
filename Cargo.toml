@@ -20,7 +20,7 @@ parking_lot = "0.12.3"
 which = "7.0.0"
 
 [dependencies.windows]
-version = "0.59.0"
+version = "0.60.0"
 features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
