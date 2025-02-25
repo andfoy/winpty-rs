@@ -1,36 +1,34 @@
+use windows::core::HRESULT;
 /// Actual ConPTY implementation.
-
-use windows::core::{PWSTR, PCWSTR, Error};
-use windows::Win32::Foundation::{
-    CloseHandle, HANDLE,
-    S_OK, INVALID_HANDLE_VALUE};
+use windows::core::{Error, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, S_OK};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_GENERIC_READ, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, OPEN_EXISTING, FILE_GENERIC_WRITE,
-    FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES};
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES, FILE_GENERIC_READ,
+    FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
 use windows::Win32::System::Console::{
-    HPCON, AllocConsole, GetConsoleWindow,
-    GetConsoleMode, CONSOLE_MODE, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-    SetConsoleMode, SetStdHandle, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
-    STD_INPUT_HANDLE, COORD, CreatePseudoConsole, ResizePseudoConsole,
-    ClosePseudoConsole, FreeConsole};
+    AllocConsole, ClosePseudoConsole, CreatePseudoConsole, FreeConsole, GetConsoleMode,
+    GetConsoleWindow, ResizePseudoConsole, SetConsoleMode, SetStdHandle, CONSOLE_MODE, COORD,
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING, HPCON, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+    STD_OUTPUT_HANDLE,
+};
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
-    PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
-    LPPROC_THREAD_ATTRIBUTE_LIST, InitializeProcThreadAttributeList,
-    UpdateProcThreadAttribute, CreateProcessW,
-    EXTENDED_STARTUPINFO_PRESENT, CREATE_UNICODE_ENVIRONMENT,
-    DeleteProcThreadAttributeList};
+    CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
+    UpdateProcThreadAttribute, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
+    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, STARTUPINFOEXW, STARTUPINFOW,
+};
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-use windows::core::HRESULT;
 
-use std::{mem, ptr};
-use std::mem::MaybeUninit;
+use parking_lot::Mutex;
 use std::ffi::OsString;
+use std::mem::MaybeUninit;
 use std::os::windows::ffi::OsStrExt;
+use std::sync::Arc;
+use std::{mem, ptr};
 
-use crate::pty::{PTYProcess, PTYImpl};
 use crate::pty::PTYArgs;
+use crate::pty::{PTYImpl, PTYProcess};
 
 /// Struct that contains the required information to spawn a console
 /// using the Windows API `CreatePseudoConsole` call.
@@ -39,18 +37,20 @@ pub struct ConPTY {
     process_info: PROCESS_INFORMATION,
     startup_info: STARTUPINFOEXW,
     process: PTYProcess,
-    console_allocated: bool
+    console_allocated: bool,
 }
 
 unsafe impl Send for ConPTY {}
 unsafe impl Sync for ConPTY {}
 
 impl PTYImpl for ConPTY {
-    fn new(args: &PTYArgs) -> Result<Box<dyn PTYImpl>, OsString> {
+    fn new(args: &PTYArgs) -> Result<Arc<Mutex<dyn PTYImpl>>, OsString> {
         let mut result: HRESULT;
         if args.cols <= 0 || args.rows <= 0 {
             let err: OsString = OsString::from(format!(
-                "PTY cols and rows must be positive and non-zero. Got: ({}, {})", args.cols, args.rows));
+                "PTY cols and rows must be positive and non-zero. Got: ({}, {})",
+                args.cols, args.rows
+            ));
             return Err(err);
         }
 
@@ -68,9 +68,14 @@ impl PTYImpl for ConPTY {
             let conout_pwstr = PCWSTR(conout_vec.as_ptr());
 
             let h_console_res = CreateFileW(
-                conout_pwstr, (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
+                conout_pwstr,
+                (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, Some(HANDLE(std::ptr::null_mut())));
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                Some(HANDLE(std::ptr::null_mut())),
+            );
 
             if let Err(err) = h_console_res {
                 let result_msg = err.message();
@@ -87,9 +92,12 @@ impl PTYImpl for ConPTY {
             let h_in_res = CreateFileW(
                 conin_pwstr,
                 (FILE_GENERIC_READ | FILE_GENERIC_WRITE).0,
-                FILE_SHARE_READ, None,
-                OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0),
-                Some(HANDLE(std::ptr::null_mut())));
+                FILE_SHARE_READ,
+                None,
+                OPEN_EXISTING,
+                FILE_FLAGS_AND_ATTRIBUTES(0),
+                Some(HANDLE(std::ptr::null_mut())),
+            );
 
             if let Err(err) = h_in_res {
                 let result_msg = err.message();
@@ -102,12 +110,11 @@ impl PTYImpl for ConPTY {
             let mut console_mode_un = MaybeUninit::<CONSOLE_MODE>::uninit();
             let console_mode_ref = console_mode_un.as_mut_ptr();
 
-            result =
-                if GetConsoleMode(h_console, console_mode_ref.as_mut().unwrap()).is_ok() {
-                    S_OK
-                } else {
-                    Error::from_win32().into()
-                };
+            result = if GetConsoleMode(h_console, console_mode_ref.as_mut().unwrap()).is_ok() {
+                S_OK
+            } else {
+                Error::from_win32().into()
+            };
 
             if result.is_err() {
                 let result_msg = result.message();
@@ -118,12 +125,13 @@ impl PTYImpl for ConPTY {
             let console_mode = console_mode_un.assume_init();
 
             // Enable stream to accept VT100 input sequences
-            result =
-                if SetConsoleMode(h_console, console_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING).is_ok() {
-                    S_OK
-                } else {
-                    Error::from_win32().into()
-                };
+            result = if SetConsoleMode(h_console, console_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+                .is_ok()
+            {
+                S_OK
+            } else {
+                Error::from_win32().into()
+            };
 
             if result.is_err() {
                 let result_msg = result.message();
@@ -132,7 +140,11 @@ impl PTYImpl for ConPTY {
             }
 
             // Set new streams
-            result = if SetStdHandle(STD_OUTPUT_HANDLE, h_console).is_ok() {S_OK} else {Error::from_win32().into()};
+            result = if SetStdHandle(STD_OUTPUT_HANDLE, h_console).is_ok() {
+                S_OK
+            } else {
+                Error::from_win32().into()
+            };
 
             if result.is_err() {
                 let result_msg = result.message();
@@ -140,7 +152,11 @@ impl PTYImpl for ConPTY {
                 return Err(string);
             }
 
-            result = if SetStdHandle(STD_ERROR_HANDLE, h_console).is_ok() {S_OK} else {Error::from_win32().into()};
+            result = if SetStdHandle(STD_ERROR_HANDLE, h_console).is_ok() {
+                S_OK
+            } else {
+                Error::from_win32().into()
+            };
 
             if result.is_err() {
                 let result_msg = result.message();
@@ -148,7 +164,11 @@ impl PTYImpl for ConPTY {
                 return Err(string);
             }
 
-            result = if SetStdHandle(STD_INPUT_HANDLE, h_in).is_ok() {S_OK} else {Error::from_win32().into()};
+            result = if SetStdHandle(STD_INPUT_HANDLE, h_in).is_ok() {
+                S_OK
+            } else {
+                Error::from_win32().into()
+            };
             if result.is_err() {
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
@@ -165,7 +185,10 @@ impl PTYImpl for ConPTY {
             let mut input_write_side = INVALID_HANDLE_VALUE;
 
             // Setup PTY size
-            let size = COORD {X: args.cols as i16, Y: args.rows as i16};
+            let size = COORD {
+                X: args.cols as i16,
+                Y: args.rows as i16,
+            };
 
             if !CreatePipe(&mut input_read_side, &mut input_write_side, None, 0).is_ok() {
                 result = Error::from_win32().into();
@@ -181,32 +204,39 @@ impl PTYImpl for ConPTY {
                 return Err(string);
             }
 
-            let pty_handle =
-                match CreatePseudoConsole(size, input_read_side, output_write_side, 0) {
-                    Ok(pty) => pty,
-                    Err(err) => {
-                        let result_msg = err.message();
-                        let string = OsString::from(result_msg);
-                        return Err(string);
-                    }
-                };
+            let pty_handle = match CreatePseudoConsole(size, input_read_side, output_write_side, 0)
+            {
+                Ok(pty) => pty,
+                Err(err) => {
+                    let result_msg = err.message();
+                    let string = OsString::from(result_msg);
+                    return Err(string);
+                }
+            };
 
             let _ = CloseHandle(input_read_side);
             let _ = CloseHandle(output_write_side);
 
-            let pty_process = PTYProcess::new(input_write_side.into(), output_read_side.into(), true);
+            let pty_process =
+                PTYProcess::new(input_write_side.into(), output_read_side.into(), true);
 
-            Ok(Box::new(ConPTY {
+            Ok(Arc::new(Mutex::new(ConPTY {
                 handle: pty_handle,
                 process_info: PROCESS_INFORMATION::default(),
                 startup_info: STARTUPINFOEXW::default(),
                 process: pty_process,
-                console_allocated
-            }) as Box<dyn PTYImpl>)
+                console_allocated,
+            })) as Arc<Mutex<dyn PTYImpl>>)
         }
     }
 
-    fn spawn(&mut self, appname: OsString, cmdline: Option<OsString>, cwd: Option<OsString>, env: Option<OsString>) -> Result<bool, OsString> {
+    fn spawn(
+        &mut self,
+        appname: OsString,
+        cmdline: Option<OsString>,
+        cwd: Option<OsString>,
+        env: Option<OsString>,
+    ) -> Result<bool, OsString> {
         let result: HRESULT;
         let mut environ: *const u16 = ptr::null();
         let mut working_dir: *const u16 = ptr::null_mut();
@@ -244,14 +274,17 @@ impl PTYImpl for ConPTY {
             let mut required_bytes_u = MaybeUninit::<usize>::uninit();
             let required_bytes_ptr = required_bytes_u.as_mut_ptr();
             let _ = InitializeProcThreadAttributeList(
-                Some(LPPROC_THREAD_ATTRIBUTE_LIST(ptr::null_mut())), 1, Some(0),
-                required_bytes_ptr.as_mut().unwrap());
+                Some(LPPROC_THREAD_ATTRIBUTE_LIST(ptr::null_mut())),
+                1,
+                Some(0),
+                required_bytes_ptr.as_mut().unwrap(),
+            );
 
             // Allocate memory to represent the list
             let mut required_bytes = required_bytes_u.assume_init();
             let mut lp_attribute_list: Box<[u8]> = vec![0; required_bytes].into_boxed_slice();
-            let proc_thread_list: LPPROC_THREAD_ATTRIBUTE_LIST = LPPROC_THREAD_ATTRIBUTE_LIST(
-                lp_attribute_list.as_mut_ptr().cast::<_>());
+            let proc_thread_list: LPPROC_THREAD_ATTRIBUTE_LIST =
+                LPPROC_THREAD_ATTRIBUTE_LIST(lp_attribute_list.as_mut_ptr().cast::<_>());
 
             // Prepare Startup Information structure
             let start_info = STARTUPINFOEXW {
@@ -263,7 +296,14 @@ impl PTYImpl for ConPTY {
             };
 
             // Initialize the list memory location
-            if !InitializeProcThreadAttributeList(Some(start_info.lpAttributeList), 1, Some(0), &mut required_bytes).is_ok() {
+            if !InitializeProcThreadAttributeList(
+                Some(start_info.lpAttributeList),
+                1,
+                Some(0),
+                &mut required_bytes,
+            )
+            .is_ok()
+            {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
@@ -272,9 +312,16 @@ impl PTYImpl for ConPTY {
 
             // Set the pseudoconsole information into the list
             if !UpdateProcThreadAttribute(
-                    start_info.lpAttributeList, 0, 0x00020016,
-                    Some(self.handle.0 as _), mem::size_of::<HPCON>(),
-                    None, None).is_ok() {
+                start_info.lpAttributeList,
+                0,
+                0x00020016,
+                Some(self.handle.0 as _),
+                mem::size_of::<HPCON>(),
+                None,
+                None,
+            )
+            .is_ok()
+            {
                 result = Error::from_win32().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
@@ -296,8 +343,9 @@ impl PTYImpl for ConPTY {
                 Some(environ as _),
                 PCWSTR(working_dir),
                 si_w_ptr.as_ref().unwrap(),
-                &mut self.process_info
-            ).is_ok();
+                &mut self.process_info,
+            )
+            .is_ok();
 
             if !succ {
                 result = Error::from_win32().into();
@@ -314,11 +362,16 @@ impl PTYImpl for ConPTY {
     fn set_size(&self, cols: i32, rows: i32) -> Result<(), OsString> {
         if cols <= 0 || rows <= 0 {
             let err: OsString = OsString::from(format!(
-                "PTY cols and rows must be positive and non-zero. Got: ({}, {})", cols, rows));
+                "PTY cols and rows must be positive and non-zero. Got: ({}, {})",
+                cols, rows
+            ));
             return Err(err);
         }
 
-        let size = COORD {X: cols as i16, Y: rows as i16};
+        let size = COORD {
+            X: cols as i16,
+            Y: rows as i16,
+        };
         unsafe {
             match ResizePseudoConsole(self.handle, size) {
                 Ok(_) => Ok(()),
@@ -366,7 +419,7 @@ impl PTYImpl for ConPTY {
 
 impl Drop for ConPTY {
     fn drop(&mut self) {
-       unsafe {
+        unsafe {
             if !self.process_info.hThread.is_invalid() {
                 let _ = CloseHandle(self.process_info.hThread);
             }

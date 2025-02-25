@@ -1,11 +1,11 @@
-#[cfg(windows)]
-use windows::Win32::System::LibraryLoader::{GetProcAddress, GetModuleHandleW};
-#[cfg(windows)]
-use windows::core::{PWSTR, PSTR, PCWSTR, PCSTR, HSTRING};
 use std::i64;
 use std::process::Command;
 use std::str;
 use which::which;
+#[cfg(windows)]
+use windows::core::{HSTRING, PCSTR, PCWSTR, PSTR, PWSTR};
+#[cfg(windows)]
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
 #[cfg(windows)]
 trait IntoPWSTR {
@@ -30,10 +30,7 @@ trait IntoPCWSTR {
 #[cfg(windows)]
 impl IntoPCWSTR for &str {
     fn into_pcwstr(self) -> PCWSTR {
-        let encoded = self
-            .encode_utf16()
-            .chain([0u16])
-            .collect::<Vec<u16>>();
+        let encoded = self.encode_utf16().chain([0u16]).collect::<Vec<u16>>();
 
         PCWSTR(encoded.as_ptr())
     }
@@ -42,17 +39,15 @@ impl IntoPCWSTR for &str {
 #[cfg(windows)]
 impl IntoPWSTR for &str {
     fn into_pwstr(self) -> PWSTR {
-        let mut encoded = self
-            .encode_utf16()
-            .chain([0u16])
-            .collect::<Vec<u16>>();
+        let mut encoded = self.encode_utf16().chain([0u16]).collect::<Vec<u16>>();
 
-        PWSTR(encoded.as_mut_ptr())    }
+        PWSTR(encoded.as_mut_ptr())
+    }
 }
 
 #[cfg(windows)]
 impl IntoPSTR for &str {
-     fn into_pstr(self) -> PSTR {
+    fn into_pstr(self) -> PSTR {
         let mut encoded = self
             .as_bytes()
             .iter()
@@ -60,29 +55,28 @@ impl IntoPSTR for &str {
             .chain([0u8])
             .collect::<Vec<u8>>();
 
-        PSTR(encoded.as_mut_ptr())    }
+        PSTR(encoded.as_mut_ptr())
+    }
 }
 
 #[cfg(windows)]
 impl IntoPCSTR for &str {
     fn into_pcstr(self) -> PCSTR {
-       let encoded = self
-           .as_bytes()
-           .iter()
-           .cloned()
-           .chain([0u8])
-           .collect::<Vec<u8>>();
+        let encoded = self
+            .as_bytes()
+            .iter()
+            .cloned()
+            .chain([0u8])
+            .collect::<Vec<u8>>();
 
-       PCSTR(encoded.as_ptr())    }
+        PCSTR(encoded.as_ptr())
+    }
 }
 
 #[cfg(windows)]
 impl IntoPWSTR for String {
     fn into_pwstr(self) -> PWSTR {
-        let mut encoded = self
-            .encode_utf16()
-            .chain([0u16])
-            .collect::<Vec<u16>>();
+        let mut encoded = self.encode_utf16().chain([0u16]).collect::<Vec<u16>>();
 
         PWSTR(encoded.as_mut_ptr())
     }
@@ -147,7 +141,7 @@ fn main() {
         let kernel32_res = unsafe { GetModuleHandleW(&HSTRING::from("kernel32.dll")) };
         let kernel32 = kernel32_res.unwrap();
 
-        let conpty = unsafe { GetProcAddress(kernel32,  "CreatePseudoConsole".into_pcstr()) };
+        let conpty = unsafe { GetProcAddress(kernel32, "CreatePseudoConsole".into_pcstr()) };
         match conpty {
             Some(_) => {
                 conpty_enabled = "1";

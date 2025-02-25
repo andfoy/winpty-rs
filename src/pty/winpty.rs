@@ -2,25 +2,24 @@
 /// [winpty](https://github.com/rprichard/winpty) as its implementation.
 /// This backend is useful as a fallback implementation to the newer ConPTY
 /// backend, which is only available on Windows 10 starting on build number 1809.
-
 use bitflags::bitflags;
 use enum_primitive_derive::Primitive;
 
 // Actual implementation if winpty is available
-#[cfg(feature="winpty")]
+#[cfg(feature = "winpty")]
 mod pty_impl;
 
-#[cfg(feature="winpty")]
+#[cfg(feature = "winpty")]
 mod bindings;
 
-#[cfg(feature="winpty")]
+#[cfg(feature = "winpty")]
 pub use pty_impl::WinPTY;
 
 // Default implementation if winpty is not available
-#[cfg(not(feature="winpty"))]
+#[cfg(not(feature = "winpty"))]
 mod default_impl;
 
-#[cfg(not(feature="winpty"))]
+#[cfg(not(feature = "winpty"))]
 pub use default_impl::WinPTY;
 
 ///  Mouse capture settings for the winpty backend.

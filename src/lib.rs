@@ -9,11 +9,10 @@
 //! [`WinPTY`]: https://github.com/rprichard/winpty
 //! [`ConPTY`]: https://docs.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
 
-
 #[macro_use]
 extern crate enum_primitive_derive;
 extern crate num_traits;
 
 pub mod pty;
 // mod pty_spawn;
-pub use pty::{PTY, PTYArgs, PTYBackend, MouseMode, AgentConfig};
+pub use pty::{AgentConfig, MouseMode, PTYArgs, PTYBackend, PTY};

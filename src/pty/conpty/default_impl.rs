@@ -1,5 +1,6 @@
-
+use parking_lot::Mutex;
 use std::ffi::OsString;
+use std::sync::Arc;
 
 // Default implementation if winpty is not available
 use crate::pty::{PTYArgs, PTYImpl};
@@ -7,11 +8,17 @@ use crate::pty::{PTYArgs, PTYImpl};
 pub struct ConPTY {}
 
 impl PTYImpl for ConPTY {
-    fn new(_args: &PTYArgs) -> Result<Box<dyn PTYImpl>, OsString> {
+    fn new(_args: &PTYArgs) -> Result<Arc<Mutex<dyn PTYImpl>>, OsString> {
         Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
 
-    fn spawn(&mut self, _appname: OsString, _cmdline: Option<OsString>, _cwd: Option<OsString>, _env: Option<OsString>) -> Result<bool, OsString> {
+    fn spawn(
+        &self,
+        _appname: OsString,
+        _cmdline: Option<OsString>,
+        _cwd: Option<OsString>,
+        _env: Option<OsString>,
+    ) -> Result<bool, OsString> {
         Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
 

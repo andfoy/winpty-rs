@@ -1,6 +1,5 @@
 #![allow(non_camel_case_types)]
 /// WinPTY C bindings.
-
 /*
  * Copyright (c) 2011-2016 Ryan Prichard
  *
@@ -22,7 +21,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  */
-
 //use std::ptr;
 // use std::ffi::c_void;
 use std::os::windows::raw::HANDLE;
@@ -145,7 +143,8 @@ extern "C" {
         cmdline: *const u16,
         cwd: *const u16,
         env: *const u16,
-        err: *mut winpty_error_ptr_t) -> *mut winpty_spawn_config_t;
+        err: *mut winpty_error_ptr_t,
+    ) -> *mut winpty_spawn_config_t;
 
     /// Free the cfg object after passing it to winpty_spawn.
     pub fn winpty_spawn_config_free(cfg: *mut winpty_spawn_config_t);
@@ -179,13 +178,19 @@ extern "C" {
         process_handle: *mut HANDLE,
         thread_handle: *mut HANDLE,
         create_process_error: *mut u32,
-        err: *mut winpty_error_ptr_t) -> bool;
+        err: *mut winpty_error_ptr_t,
+    ) -> bool;
 }
 
 // winpty agent RPC calls: everything else
 extern "C" {
     /// Change the size of the Windows console window.
-    pub fn winpty_set_size(wp: *mut winpty_t, cols: i32, rows: i32, err: *mut winpty_error_ptr_t) -> bool;
+    pub fn winpty_set_size(
+        wp: *mut winpty_t,
+        cols: i32,
+        rows: i32,
+        err: *mut winpty_error_ptr_t,
+    ) -> bool;
 
     /// Frees the winpty_t object and the OS resources contained in it.  This
     /// call breaks the connection with the agent, which should then close its
