@@ -117,6 +117,7 @@ pub struct PTYArgs {
 /// let conpty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
 /// let winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
 /// ```
+#[derive(Clone)]
 pub struct PTY {
     /// Backend used by the current pseudoterminal, must be one of [`self::PTYBackend`].
     /// If the value is [`self::PTYBackend::NoBackend`], then no operations will be available.
