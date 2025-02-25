@@ -7,12 +7,14 @@ use windows::Win32::Storage::FileSystem::{
     OPEN_EXISTING,
 };
 
+use parking_lot::Mutex;
 use std::ffi::{c_void, OsString};
 use std::mem::MaybeUninit;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::prelude::*;
 use std::ptr;
 use std::slice::from_raw_parts;
+use std::sync::Arc;
 
 use super::bindings::*;
 use crate::pty::PTYArgs;
@@ -161,7 +163,7 @@ pub struct WinPTY {
 }
 
 impl PTYImpl for WinPTY {
-    fn new(args: &PTYArgs) -> Result<Box<dyn PTYImpl>, OsString> {
+    fn new(args: &PTYArgs) -> Result<Arc<Mutex<dyn PTYImpl>>, OsString> {
         unsafe {
             //let mut err: Box<winpty_error_t> = Box::new_uninit();
             //let mut err_ptr: *mut winpty_error_t = &mut *err;
@@ -241,10 +243,10 @@ impl PTYImpl for WinPTY {
             let conout = conout_res.unwrap();
 
             let process = PTYProcess::new(conin.into(), conout.into(), false);
-            Ok(Box::new(WinPTY {
+            Ok(Arc::new(Mutex::new(WinPTY {
                 ptr: pty_ptr,
                 process,
-            }) as Box<dyn PTYImpl>)
+            })) as Arc<Mutex<dyn PTYImpl>>)
         }
     }
 
