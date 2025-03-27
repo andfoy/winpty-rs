@@ -1,4 +1,3 @@
-
 //! This module declares the [`PTY`] struct, which enables a Rust
 //! program to create a pseudoterminal (PTY) in Windows.
 //!
@@ -15,6 +14,7 @@ mod conpty;
 mod base;
 
 use std::ffi::OsString;
+use std::default::Default;
 
 // Local imports
 use self::winpty::WinPTY;
@@ -37,6 +37,7 @@ pub enum PTYBackend {
 }
 
 /// Data struct that represents the possible arguments used to create a pseudoterminal
+#[derive(Clone, Debug)]
 pub struct PTYArgs {
 	// Common arguments
 	/// Number of character columns to display.
@@ -53,6 +54,17 @@ pub struct PTYArgs {
 	pub agent_config: AgentConfig
 }
 
+impl Default for PTYArgs {
+	fn default() -> Self {
+		Self {
+			cols: 80,
+			rows: 24,
+			mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+			timeout: 10000,
+			agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES
+		}
+	}
+}
 
 /// Pseudoterminal struct that communicates with a spawned process.
 ///
@@ -83,7 +95,7 @@ pub struct PTYArgs {
 /// pty.spawn(cmd, None, None, None).unwrap();
 ///
 /// // Read the spawned process standard output (non-blocking).
-/// let output = pty.read(1000, false);
+/// let output = pty.read(false);
 ///
 /// // Write to the spawned process standard input.
 /// let to_write = OsString::from("echo \"some str\"\r\n");
@@ -230,21 +242,20 @@ impl PTY {
 		self.backend
 	}
 
-	/// Read at most `length` characters from a process standard output.
+	/// Read from the process standard output.
     ///
     /// # Arguments
-    /// * `length` - Upper limit on the number of characters to read.
-    /// * `blocking` - Block the reading thread if no bytes are available.
+    /// * `blocking` - If true, wait for data to be available. If false, return immediately if no data is available.
+    ///
+    /// # Returns
+    /// * `Ok(OsString)` - The data read from the process output
+    /// * `Err(OsString)` - If EOF is reached or an error occurs
     ///
     /// # Notes
-    /// * If `blocking = false`, then the function will check how much characters are available on
-    /// the stream and will read the minimum between the input argument and the total number of
-    /// characters available.
-    ///
-    /// * The bytes returned are represented using a [`OsString`] since Windows operates over
-    /// `u16` strings.
-	pub fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
-        self.pty.read(length, blocking)
+    /// * The actual read operation happens in a background thread with a fixed buffer size
+    /// * The returned data is represented using a [`OsString`] since Windows operates over `u16` strings
+    pub fn read(&self, blocking: bool) -> Result<OsString, OsString> {
+        self.pty.read(blocking)
     }
 
 	/// Write a (possibly) UTF-16 string into the standard input of a process.

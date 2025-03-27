@@ -1,4 +1,3 @@
-
 use std::ffi::OsString;
 use crate::pty::{PTYArgs, PTYImpl};
 
@@ -17,7 +16,7 @@ impl PTYImpl for WinPTY {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
 
-    fn read(&self, _length: u32, _blocking: bool) -> Result<OsString, OsString> {
+    fn read(&self, _blocking: bool) -> Result<OsString, OsString> {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
 

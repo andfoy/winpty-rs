@@ -40,7 +40,7 @@ fn read_write_winpty() {
     let mut out: OsString;
 
     while !regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
     }
 
@@ -51,7 +51,7 @@ fn read_write_winpty() {
 
     output_str = "";
     while !echo_regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
     }
 
@@ -62,7 +62,7 @@ fn read_write_winpty() {
 
     output_str = "";
     while !out_regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
     }
 
@@ -90,7 +90,7 @@ fn set_size_winpty() {
     let mut out: OsString;
 
     while !regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
     }
 
@@ -123,7 +123,7 @@ fn set_size_winpty() {
         let mut out: OsString;
 
         while !regex.is_match(output_str) {
-            out = pty.read(1000, false).unwrap();
+            out = pty.read(false).unwrap();
             output_str = out.to_str().unwrap();
         }
 

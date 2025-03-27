@@ -46,7 +46,7 @@ fn read_write_conpty() {
     let mut tries = 0;
 
     while !regex.is_match(output_str) && tries < 5 {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
         println!("{:?}", output_str);
         tries += 1;
@@ -59,7 +59,7 @@ fn read_write_conpty() {
 
     output_str = "";
     while !echo_regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
         println!("{:?}", output_str);
     }
@@ -71,7 +71,7 @@ fn read_write_conpty() {
 
     output_str = "";
     while !out_regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
         println!("{:?}", output_str);
     }
@@ -101,7 +101,7 @@ fn set_size_conpty() {
     let mut out: OsString;
 
     while !regex.is_match(output_str) {
-        out = pty.read(1000, false).unwrap();
+        out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
     }
 
@@ -140,7 +140,7 @@ fn set_size_conpty() {
         let mut out: OsString;
 
         while !regex.is_match(output_str) {
-            out = pty.read(1000, false).unwrap();
+            out = pty.read(false).unwrap();
             output_str = out.to_str().unwrap();
         }
 
@@ -234,7 +234,7 @@ fn check_eof_output() {
     let mut valid = true;
 
     while valid {
-        let out_wrapped = pty.read(1000, false);
+        let out_wrapped = pty.read(false);
         match out_wrapped {
             Ok(out) => collect_vec.push(out.into_string().unwrap()),
             Err(_) => {valid = false;}

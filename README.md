@@ -81,7 +81,7 @@ as well to get information about its status.
 pty.spawn(cmd, None, None, None).unwrap();
 
 // Read the spawned process standard output (non-blocking).
-let output = pty.read(1000, false);
+let output = pty.read(false);
 
 // Write to the spawned process standard input.
 let to_write = OsString::from("echo \"some str\"\r\n");
