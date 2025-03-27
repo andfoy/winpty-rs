@@ -14,7 +14,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use std::mem::MaybeUninit;
-use std::cmp::min;
 use std::ffi::OsString;
 use core::ffi::c_void;
 
@@ -105,20 +104,19 @@ pub trait PTYImpl: Sync + Send {
     /// * `rows` - Number of line rows to display.
     fn set_size(&self, cols: i32, rows: i32) -> Result<(), OsString>;
 
-    /// Read at most `length` characters from a process standard output.
+    /// Read from the process standard output.
     ///
     /// # Arguments
-    /// * `length` - Upper limit on the number of characters to read.
-    /// * `blocking` - Block the reading thread if no bytes are available.
+    /// * `blocking` - If true, wait for data to be available. If false, return immediately if no data is available.
+    ///
+    /// # Returns
+    /// * `Ok(OsString)` - The data read from the process output
+    /// * `Err(OsString)` - If EOF is reached or an error occurs
     ///
     /// # Notes
-    /// * If `blocking = false`, then the function will check how much characters are available on
-    /// the stream and will read the minimum between the input argument and the total number of
-    /// characters available.
-    ///
-    /// * The bytes returned are represented using a [`OsString`] since Windows operates over
-    /// `u16` strings.
-    fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString>;
+    /// * The actual read operation happens in a background thread with a fixed buffer size
+    /// * The returned data is represented using a [`OsString`] since Windows operates over `u16` strings
+    fn read(&self, blocking: bool) -> Result<OsString, OsString>;
 
     /// Write a (possibly) UTF-16 string into the standard input of a process.
     ///
@@ -157,14 +155,12 @@ pub trait PTYImpl: Sync + Send {
 }
 
 
-fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> Result<OsString, OsString> {
+fn read(blocking: bool, stream: HANDLE, using_pipes: bool) -> Result<OsString, OsString> {
     let mut result: HRESULT;
     if !blocking {
         if using_pipes {
             let mut bytes_u = MaybeUninit::<u32>::uninit();
 
-            //let mut available_bytes = Box::<>::new_uninit();
-            //let bytes_ptr: *mut u32 = &mut *available_bytes;
             unsafe {
                 let bytes_ptr = ptr::addr_of_mut!(*bytes_u.as_mut_ptr());
                 let bytes_ref = bytes_ptr.as_mut().unwrap();
@@ -178,24 +174,17 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                         Error::from_win32().into()
                     };
 
-
                 if result.is_err() {
                     let result_msg = result.message();
                     let string = OsString::from(result_msg);
                     return Err(string);
                 }
-                let num_bytes = bytes_u.assume_init();
-                length = min(length, num_bytes);
             }
         } else {
-            //let mut size: Box<i64> = Box::new_uninit();
-            //let size_ptr: *mut i64 = &mut *size;
             let mut size = MaybeUninit::<i64>::uninit();
-            // let size_ptr: *mut i64 = ptr::null_mut();
             unsafe {
                 let size_ptr = ptr::addr_of_mut!(*size.as_mut_ptr());
                 let size_ref = size_ptr.as_mut().unwrap();
-                // let size_ref = *size.as_mut_ptr();
                 result = if GetFileSizeEx(stream, size_ref).is_ok() { S_OK } else { Error::from_win32().into() };
 
                 if result.is_err() {
@@ -203,51 +192,34 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
                     let string = OsString::from(result_msg);
                     return Err(string);
                 }
-                length = min(length, *size_ptr as u32);
                 size.assume_init();
             }
         }
     }
 
-    //let mut buf: Vec<u16> = Vec::with_capacity((length + 1) as usize);
-    //buf.fill(1);
-    let os_str = "\0".repeat((length + 1) as usize);
+    const BUFFER_SIZE: usize = 32768;
+    let os_str = "\0".repeat(BUFFER_SIZE);
     let mut buf_vec: Vec<u8> = os_str.as_str().as_bytes().to_vec();
     let mut chars_read = MaybeUninit::<u32>::uninit();
-    //let chars_read: *mut u32 = ptr::null_mut();
-    // println!("Length: {}, {}", length, length > 0);
-    // if length > 0 {
-        unsafe {
-            match length {
-                0 => {
 
-                }
-                _ => {
-                    // let chars_read_ptr = chars_read.as_mut_ptr();
-                    let chars_read_ptr = ptr::addr_of_mut!(*chars_read.as_mut_ptr());
-                    // let chars_read_mut = chars_read_ptr.as_mut();
-                    let chars_read_mut = Some(chars_read_ptr);
-                    // println!("Blocked here");
-                    result =
-                        if ReadFile(stream, Some(&mut buf_vec[..]),
-                                    chars_read_mut, None).is_ok() {
-                            S_OK
-                        } else {
-                            Error::from_win32().into()
-                        };
-                    // println!("Unblocked here");
+    unsafe {
+        let chars_read_ptr = ptr::addr_of_mut!(*chars_read.as_mut_ptr());
+        let chars_read_mut = Some(chars_read_ptr);
+        result =
+            if ReadFile(stream, Some(&mut buf_vec[..]),
+                        chars_read_mut, None).is_ok() {
+                S_OK
+            } else {
+                Error::from_win32().into()
+            };
 
-                    if result.is_err() {
-                        let result_msg = result.message();
-                        let string = OsString::from(result_msg);
-                        return Err(string);
-                    }
-                }
-            }
+        if result.is_err() {
+            let result_msg = result.message();
+            let string = OsString::from(result_msg);
+            return Err(string);
         }
-    // }
+    }
 
-    // let os_str = OsString::with_capacity(buf_vec.len());
     let mut vec_buf: Vec<u16> = std::iter::repeat(0).take(buf_vec.len()).collect();
 
     unsafe {
@@ -256,7 +228,6 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
             Some(&mut vec_buf[..]));
     }
 
-    // let non_zeros: Vec<u16> = vec_buf.split(|elem| *elem == 0 as u16).collect();
     let non_zeros_init = Vec::new();
     let non_zeros: Vec<u16> =
         vec_buf
@@ -266,7 +237,6 @@ fn read(mut length: u32, blocking: bool, stream: HANDLE, using_pipes: bool) -> R
             acc.append(&mut x);
             acc
         });
-    // let non_zeros: &[u16] = non_zeros_slices.into_iter().reduce(|acc, item| [acc, item].concat()).unwrap();
     let os_str = OsString::from_wide(&non_zeros[..]);
     Ok(os_str)
 }
@@ -372,14 +342,8 @@ pub struct PTYProcess {
     reader_alive: mpsc::Sender<bool>,
     /// Channel used to send the process handle to the reading thread.
     reader_process_out: mpsc::Sender<Option<LocalHandle>>,
-    /// Handle to the thread used to cache read output.
-    cache_thread: Option<thread::JoinHandle<()>>,
-    /// Channel used to submit a retrieval request to the cache.
-    cache_req: mpsc::Sender<Option<(u32, bool)>>,
-    /// Channel used to receive a response from the cache.
-    cache_resp: mpsc::Receiver<Result<OsString, OsString>>,
-    /// Channel used to keep the cache alive.
-    cache_alive: mpsc::Sender<bool>,
+    /// Channel used to receive a response from the reading thread.
+    reader_out_rx: mpsc::Receiver<Option<Result<OsString, OsString>>>,
 }
 
 impl PTYProcess {
@@ -393,103 +357,35 @@ impl PTYProcess {
     /// # Returns
     /// * `pty` - A new [`PTYProcess`] instance.
     pub fn new(conin: LocalHandle, conout: LocalHandle, using_pipes: bool) -> PTYProcess {
-        // Continuous reading thread channels
+        const BUFFER_SIZE: usize = 32768;  // 32KB buffer
+        
+        // Keep only the reading thread channel
         let (reader_out_tx, reader_out_rx) = mpsc::channel::<Option<Result<OsString, OsString>>>();
         let (reader_alive_tx, reader_alive_rx) = mpsc::channel::<bool>();
         let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<LocalHandle>>();
 
-        // Reading cache thread channels
-        let (cache_alive_tx, cache_alive_rx) = mpsc::channel::<bool>();
-        let (cache_req_tx, cache_req_rx) = mpsc::channel::<Option<(u32, bool)>>();
-        let (cache_resp_tx, cache_resp_rx) = mpsc::channel::<Result<OsString, OsString>>();
-
         let reader_thread = thread::spawn(move || {
             let process_result = reader_process_rx.recv();
             if let Ok(Some(process)) = process_result {
-                // let mut alive = reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true);
-                // alive = alive && !is_eof(process, conout).unwrap();
-
-                while reader_alive_rx.recv_timeout(Duration::from_millis(100)).unwrap_or(true) {
+                let mut read_buf = Vec::with_capacity(BUFFER_SIZE);
+                
+                while reader_alive_rx.recv_timeout(Duration::from_micros(100)).unwrap_or(true) {
                     if !is_eof(process.into(), conout.into()).unwrap() {
-                        let result = read(4096, true, conout.into(), using_pipes);
+                        // Pre-allocate buffer
+                        read_buf.clear();
+                        read_buf.resize(BUFFER_SIZE, 0);
+                        
+                        let result = read(true, conout.into(), using_pipes);
                         reader_out_tx.send(Some(result)).unwrap();
                     } else {
                         reader_out_tx.send(None).unwrap();
                     }
-                    // alive = reader_alive_rx.recv_timeout(Duration::from_millis(300)).unwrap_or(true);
-                    // alive = alive && !is_eof(process, conout).unwrap();
                 }
             }
 
             drop(reader_process_rx);
             drop(reader_alive_rx);
             drop(reader_out_tx);
-        });
-
-        let cache_thread = thread::spawn(move || {
-            let mut read_buf = OsString::new();
-            let mut eof_reached;
-            while cache_alive_rx.try_recv().unwrap_or(true) {
-                if let Ok(Some((length, blocking))) = cache_req_rx.recv() {
-                    let mut pending_read: Option<OsString> = None;
-
-                    if (length as usize) <= read_buf.len() {
-                        pending_read = Some(OsString::new());
-                    }
-
-                    eof_reached = false;
-
-                    let out =
-                        match pending_read {
-                            Some(bytes) => Ok(bytes),
-                            None => {
-                                match blocking {
-                                    true => {
-                                        match reader_out_rx.recv() {
-                                            Ok(None) => {
-                                                eof_reached = true;
-                                                Ok(OsString::new())
-                                            }
-                                            Ok(Some(bytes)) => bytes,
-                                            Err(_) => Ok(OsString::new())
-                                        }
-                                    },
-                                    false => {
-                                        match reader_out_rx.recv_timeout(Duration::from_millis(200)) {
-                                            Ok(None) => {
-                                                eof_reached = true;
-                                                Ok(OsString::new())
-                                            }
-                                            Ok(Some(bytes)) => bytes,
-                                            Err(_) => Ok(OsString::new())
-                                        }
-                                    }
-                                }
-                            }
-                        };
-
-                    match out {
-                        Ok(bytes) => {
-                            read_buf.push(bytes);
-                            let vec_buf: Vec<u16> = read_buf.encode_wide().collect();
-                            let to_read = min(length as usize, vec_buf.len());
-                            let (left, right) = vec_buf.split_at(to_read);
-                            let to_return = OsString::from_wide(left);
-                            read_buf = OsString::from_wide(right);
-                            if eof_reached && to_return.is_empty() && length != 0 {
-                                cache_resp_tx.send(Err(OsString::from("Standard out reached EOF"))).unwrap();
-                            } else {
-                                cache_resp_tx.send(Ok(to_return)).unwrap();
-                            }
-                        },
-                        Err(err) => { cache_resp_tx.send(Err(err)).unwrap(); }
-                    }
-                }
-            }
-
-            drop(reader_out_rx);
-            drop(cache_alive_rx);
-            drop(cache_resp_tx);
         });
 
         PTYProcess {
@@ -501,37 +397,40 @@ impl PTYProcess {
             reading_thread: Some(reader_thread),
             reader_alive: reader_alive_tx,
             reader_process_out: reader_process_tx,
-            cache_thread: Some(cache_thread),
-            cache_req: cache_req_tx,
-            cache_resp: cache_resp_rx,
-            cache_alive: cache_alive_tx,
+            reader_out_rx,
         }
     }
 
-    /// Read at least `length` characters from a process standard output.
+    /// Read from the process standard output.
     ///
     /// # Arguments
-    /// * `length` - Upper limit on the number of characters to read.
-    /// * `blocking` - Block the reading thread if no bytes are available.
+    /// * `blocking` - If true, wait for data to be available. If false, return immediately if no data is available.
+    ///
+    /// # Returns
+    /// * `Ok(OsString)` - The data read from the process output
+    /// * `Err(OsString)` - If EOF is reached or an error occurs
     ///
     /// # Notes
-    /// * If `blocking = false`, then the function will check how much characters are available on
-    /// the stream and will read the minimum between the input argument and the total number of
-    /// characters available.
-    ///
-    /// * The bytes returned are represented using a [`OsString`] since Windows operates over
-    /// `u16` strings.
-    pub fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
-        // read(length, blocking, self.conout, self.using_pipes)
-        self.cache_req.send(Some((length, blocking))).unwrap();
-
-        match self.cache_resp.recv() {
-            Ok(Ok(bytes)) => Ok(bytes),
-            Ok(Err(err)) => Err(err),
-            Err(err) => Err(err.to_string().into())
+    /// * The actual read operation happens in a background thread with a fixed buffer size
+    /// * The returned data is represented using a [`OsString`] since Windows operates over `u16` strings
+    pub fn read(&self, blocking: bool) -> Result<OsString, OsString> {
+        // Get data directly from reading thread
+        match blocking {
+            true => {
+                match self.reader_out_rx.recv() {
+                    Ok(None) => Err(OsString::from("Standard out reached EOF")),
+                    Ok(Some(bytes)) => bytes,
+                    Err(_) => Ok(OsString::new())
+                }
+            },
+            false => {
+                match self.reader_out_rx.recv_timeout(Duration::from_micros(200)) {
+                    Ok(None) => Err(OsString::from("Standard out reached EOF")),
+                    Ok(Some(bytes)) => bytes,
+                    Err(_) => Ok(OsString::new())
+                }
+            }
         }
-        // let out = self.reader_in.recv().unwrap();
-        // out
     }
 
     /// Write an (possibly) UTF-16 string into the standard input of a process.
@@ -543,8 +442,8 @@ impl PTYProcess {
     /// The total number of characters written if the call was successful, else
     /// an [`OsString`] containing an human-readable error.
     pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
+        const BUFFER_SIZE: usize = 8192;
         let vec_buf: Vec<u16> = buf.encode_wide().collect();
-        let result: HRESULT;
 
         unsafe {
             let required_size = WideCharToMultiByte(
@@ -558,25 +457,28 @@ impl PTYProcess {
                 PCSTR(ptr::null_mut::<u8>()),
                 None);
 
-            let mut written_bytes = MaybeUninit::<u32>::uninit();
-            let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*written_bytes.as_mut_ptr());
+            let mut total_written = 0u32;
+            let mut bytes_written = MaybeUninit::<u32>::uninit();
+            let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes_written.as_mut_ptr());
             let bytes_ref = Some(bytes_ptr);
-            // let bytes_ref = bytes_ptr.as_mut();
 
-            result =
-                if WriteFile(Into::<HANDLE>::into(self.conin), Some(&bytes_buf[..]), bytes_ref, None).is_ok() {
-                    S_OK
-                } else {
-                    Error::from_win32().into()
-                };
+            // Write in chunks
+            for chunk in bytes_buf.chunks(BUFFER_SIZE) {
+                let write_result =
+                    if WriteFile(Into::<HANDLE>::into(self.conin), Some(chunk), bytes_ref, None).is_ok() {
+                        S_OK
+                    } else {
+                        Error::from_win32().into()
+                    };
 
-            if result.is_err() {
-                let result_msg = result.message();
-                let string = OsString::from(result_msg);
-                return Err(string);
+                if write_result.is_err() {
+                    let result_msg = write_result.message();
+                    let string = OsString::from(result_msg);
+                    return Err(string);
+                }
+                total_written += bytes_written.assume_init();
             }
-            let total_bytes = written_bytes.assume_init();
-            Ok(total_bytes)
+            Ok(total_written)
         }
     }
 
@@ -698,17 +600,6 @@ impl Drop for PTYProcess {
             // Wait for the thread to be down
             if let Some(thread_handle) = self.reading_thread.take() {
                 thread_handle.join().unwrap();
-            }
-
-            // Send message to cache to finish
-            if self.cache_alive.send(false).is_ok() {}
-
-            // Send a None request to the cache in order to prevent blockage
-            if self.cache_req.send(None).is_ok() {}
-
-            // Wait for the cache to be down
-            if let Some(cache_handle) = self.cache_thread.take() {
-                cache_handle.join().unwrap();
             }
 
             if !self.conin.is_invalid() {
