@@ -18,13 +18,13 @@ fn main() {
             println!("{:?}", appname);
             match pty.spawn(appname, None, None, None) {
                 Ok(_) => {
-                    let mut output = pty.read(1000, false);
+                    let mut output = pty.read(false);
                     match output {
                         Ok(out) => println!("{}", out.to_str().unwrap()),
                         Err(err) => panic!("{:?}", err)
                     }
 
-                    output = pty.read(1000, false);
+                    output = pty.read(false);
                     match output {
                         Ok(out) => println!("{}", out.to_str().unwrap()),
                         Err(err) => panic!("{:?}", err)
@@ -35,13 +35,13 @@ fn main() {
                         Err(err) => panic!("{:?}", err)
                     }
 
-                    output = pty.read(1000, false);
+                    output = pty.read(false);
                     match output {
                         Ok(out) => println!("{}", out.to_str().unwrap()),
                         Err(err) => panic!("{:?}", err)
                     }
 
-                    output = pty.read(1000, false);
+                    output = pty.read(false);
                     match output {
                         Ok(out) => println!("{}", out.to_str().unwrap()),
                         Err(err) => panic!("{:?}", err)
@@ -57,13 +57,13 @@ fn main() {
                         Err(err) => panic!("{:?}", err)
                     }
 
-                    output = pty.read(1000, false);
+                    output = pty.read(false);
                     match output {
                         Ok(out) => println!("{}", out.to_str().unwrap()),
                         Err(err) => panic!("{:?}", err)
                     }
 
-                    output = pty.read(1000, false);
+                    output = pty.read(false);
                     match output {
                         Ok(out) => println!("{}", out.to_str().unwrap()),
                         Err(err) => panic!("{:?}", err)

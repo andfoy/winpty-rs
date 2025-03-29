@@ -24,12 +24,12 @@ mod default_impl;
 pub use default_impl::WinPTY;
 
 ///  Mouse capture settings for the winpty backend.
-#[derive(Primitive)]
+#[derive(Primitive, Clone, Debug)]
 #[allow(non_camel_case_types)]
 pub enum MouseMode {
     /// QuickEdit mode is initially disabled, and the agent does not send mouse
     /// mode sequences to the terminal.  If it receives mouse input, though, it
-    // still writes MOUSE_EVENT_RECORD values into CONIN.
+    /// still writes MOUSE_EVENT_RECORD values into CONIN.
     WINPTY_MOUSE_MODE_NONE = 0,
 
     /// QuickEdit mode is initially enabled.  As CONIN enters or leaves mouse
@@ -46,6 +46,7 @@ pub enum MouseMode {
 
 bitflags! {
     /// General configuration settings for the winpty backend.
+    #[derive(Clone, Debug)]
     pub struct AgentConfig: u64 {
         /// Create a new screen buffer (connected to the "conerr" terminal pipe) and
         /// pass it to child processes as the STDERR handle.  This flag also prevents

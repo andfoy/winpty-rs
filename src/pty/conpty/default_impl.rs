@@ -1,4 +1,3 @@
-
 use std::ffi::OsString;
 
 // Default implementation if winpty is not available
@@ -19,7 +18,7 @@ impl PTYImpl for ConPTY {
         Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
 
-    fn read(&self, _length: u32, _blocking: bool) -> Result<OsString, OsString> {
+    fn read(&self, _blocking: bool) -> Result<OsString, OsString> {
         Err(OsString::from("pty_rs was compiled without ConPTY enabled"))
     }
 

@@ -1,7 +1,7 @@
 /// Actual WinPTY backend implementation.
 
-use windows::Win32::Foundation::{HANDLE};
-use windows::core::{PCWSTR};
+use windows::Win32::Foundation::HANDLE;
+use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_GENERIC_READ, FILE_SHARE_NONE,
     OPEN_EXISTING, FILE_GENERIC_WRITE,
@@ -279,8 +279,8 @@ impl PTYImpl for WinPTY {
         self.ptr.set_size(cols, rows)
     }
 
-    fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
-        self.process.read(length, blocking)
+    fn read(&self, blocking: bool) -> Result<OsString, OsString> {
+        self.process.read(blocking)
     }
 
     fn write(&self, buf: OsString) -> Result<u32, OsString> {

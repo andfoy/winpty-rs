@@ -331,8 +331,8 @@ impl PTYImpl for ConPTY {
         }
     }
 
-    fn read(&self, length: u32, blocking: bool) -> Result<OsString, OsString> {
-        self.process.read(length, blocking)
+    fn read(&self, blocking: bool) -> Result<OsString, OsString> {
+        self.process.read(blocking)
     }
 
     fn write(&self, buf: OsString) -> Result<u32, OsString> {
