@@ -242,7 +242,7 @@ impl PTY {
 		self.backend
 	}
 
-	/// Read from the process standard output.
+	/// Read all available characters from the standard output of a process.
     ///
     /// # Arguments
     /// * `blocking` - If true, wait for data to be available. If false, return immediately if no data is available.
@@ -252,7 +252,7 @@ impl PTY {
     /// * `Err(OsString)` - If EOF is reached or an error occurs
     ///
     /// # Notes
-    /// * The actual read operation happens in a background thread with a fixed buffer size
+    /// * The actual read operation happens in a background thread
     /// * The returned data is represented using a [`OsString`] since Windows operates over `u16` strings
     pub fn read(&self, blocking: bool) -> Result<OsString, OsString> {
         self.pty.read(blocking)
