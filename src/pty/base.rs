@@ -357,8 +357,6 @@ impl PTYProcess {
     /// # Returns
     /// * `pty` - A new [`PTYProcess`] instance.
     pub fn new(conin: LocalHandle, conout: LocalHandle, using_pipes: bool) -> PTYProcess {
-        const BUFFER_SIZE: usize = 32768;  // 32KB buffer
-        
         // Keep only the reading thread channel
         let (reader_out_tx, reader_out_rx) = mpsc::channel::<Option<Result<OsString, OsString>>>();
         let (reader_alive_tx, reader_alive_rx) = mpsc::channel::<bool>();
@@ -367,14 +365,8 @@ impl PTYProcess {
         let reader_thread = thread::spawn(move || {
             let process_result = reader_process_rx.recv();
             if let Ok(Some(process)) = process_result {
-                let mut read_buf = Vec::with_capacity(BUFFER_SIZE);
-                
                 while reader_alive_rx.recv_timeout(Duration::from_micros(100)).unwrap_or(true) {
                     if !is_eof(process.into(), conout.into()).unwrap() {
-                        // Pre-allocate buffer
-                        read_buf.clear();
-                        read_buf.resize(BUFFER_SIZE, 0);
-                        
                         let result = read(true, conout.into(), using_pipes);
                         reader_out_tx.send(Some(result)).unwrap();
                     } else {
