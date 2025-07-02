@@ -17,9 +17,16 @@ bitflags = "2.3"
 
 [build-dependencies]
 which = "7.0.0"
+glob = "0.3.2"
+
+[dependencies.windows-strings]
+# path = "../windows-rs/crates/libs/strings"
+git = "https://github.com/andfoy/windows-rs.git"
+# version = "0.4"
+
 
 [dependencies.windows]
-version = "0.61.1"
+git = "https://github.com/andfoy/windows-rs.git"
 features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -30,11 +37,14 @@ features = [
     "Win32_Globalization",
     # ConPTY-specific
     "Win32_System_Console",
-    "Win32_UI_WindowsAndMessaging"
+    "Win32_UI_WindowsAndMessaging",
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Win32_System_WindowsProgramming"
 ]
 
 [build-dependencies.windows]
-version = "0.58.0"
+git = "https://github.com/andfoy/windows-rs.git"
 features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader"
@@ -50,6 +60,7 @@ targets = ["x86_64-pc-windows-msvc"]
 [features]
 conpty = []
 winpty = []
+conpty_local = []
 winpty_example = ["winpty"]
 conpty_example = ["conpty"]
 

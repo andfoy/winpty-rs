@@ -127,7 +127,7 @@ mod tests {
         let mut args = PTYArgs::default();
         args.cols = 80;
         args.rows = 24;
-        
+
         let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
         pty.spawn(
             "cmd.exe".into(),

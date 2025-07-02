@@ -221,7 +221,7 @@ impl PTYImpl for WinPTY {
             let conin = conin_res.unwrap();
             let conout = conout_res.unwrap();
 
-            let process = PTYProcess::new(conin.into(), conout.into(), false);
+            let process = PTYProcess::new(conin.into(), conout.into(), false, false);
             Ok(Box::new(WinPTY { ptr: pty_ptr, process }) as Box<dyn PTYImpl>)
         }
     }
@@ -283,7 +283,7 @@ impl PTYImpl for WinPTY {
         self.process.read(blocking)
     }
 
-    fn write(&self, buf: OsString) -> Result<u32, OsString> {
+    fn write(&mut self, buf: OsString) -> Result<u32, OsString> {
         self.process.write(buf)
     }
 

@@ -10,3 +10,9 @@ Cargo.lock
 **/*.rs.bk
 
 .vscode/
+
+*.exe
+*.dll
+*.lib
+
+Microsoft.Windows.Console.ConPTY*/

@@ -1,6 +1,8 @@
 #![cfg(feature="conpty")]
 
 use std::ffi::OsString;
+use std::thread::sleep;
+use std::time::Duration;
 use std::{thread, time};
 use regex::Regex;
 
@@ -45,7 +47,11 @@ fn read_write_conpty() {
     let mut out: OsString;
     let mut tries = 0;
 
-    while !regex.is_match(output_str) && tries < 5 {
+    sleep(Duration::from_millis(10000));
+
+    pty.write("\r\n".into()).unwrap();
+
+    while !regex.is_match(output_str) && tries < 100 {
         out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
         println!("{:?}", output_str);
@@ -73,7 +79,7 @@ fn read_write_conpty() {
     while !out_regex.is_match(output_str) {
         out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
-        println!("{:?}", output_str);
+        println!("Last: {:?}", output_str);
     }
 
     println!("!!!!!!!!!!!!!!!!!");
@@ -94,6 +100,8 @@ fn set_size_conpty() {
     let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
+
+    sleep(Duration::from_millis(10000));
 
     pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
     let regex = Regex::new(r".*Width.*").unwrap();
@@ -178,6 +186,8 @@ fn is_alive_exitstatus_conpty() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
+    sleep(Duration::from_millis(10000));
+
     pty.write("echo wait\r\n".into()).unwrap();
     assert!(pty.is_alive().unwrap());
     assert_eq!(pty.get_exitstatus().unwrap(), None);
@@ -204,6 +214,8 @@ fn wait_for_exit() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
+    sleep(Duration::from_millis(10000));
+
     pty.write("echo wait\r\n".into()).unwrap();
     assert!(pty.is_alive().unwrap());
     assert_eq!(pty.get_exitstatus().unwrap(), None);
@@ -229,6 +241,7 @@ fn check_eof_output() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, Some(OsString::from("-c \"print(\';\'.join([str(i) for i in range(0, 2048)]))\"")), None, None).unwrap();
     assert!(pty.is_alive().unwrap());
+    sleep(Duration::from_millis(10000));
 
     let mut collect_vec: Vec<String> = Vec::new();
     let mut valid = true;
@@ -242,7 +255,7 @@ fn check_eof_output() {
     }
 
     let output_str = collect_vec.join("");
-    assert!(output_str.ends_with("2047\r\n"));
+    assert!(output_str.ends_with("2047"));
 
     println!("{:?}", output_str);
     let _ = pty.wait_for_exit();

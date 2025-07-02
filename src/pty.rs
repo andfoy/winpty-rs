@@ -127,8 +127,15 @@ impl Default for PTYArgs {
 /// };
 ///
 /// // Initialize a winpty and a conpty pseudoterminal.
-/// let conpty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
-/// let winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+/// let mut conpty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+/// let mut winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+///
+/// conpty.spawn(cmd.clone(), None, None, None).unwrap();
+/// winpty.spawn(cmd.clone(), None, None, None).unwrap();
+///
+/// let to_write = OsString::from("echo \"some str\"\r\n");
+/// let num_bytes1 = conpty.write(to_write.clone()).unwrap();
+/// let num_bytes2 = winpty.write(to_write.clone()).unwrap();
 /// ```
 pub struct PTY {
 	 /// Backend used by the current pseudoterminal, must be one of [`self::PTYBackend`].
@@ -266,7 +273,7 @@ impl PTY {
     /// # Returns
     /// The total number of characters written if the call was successful, else
     /// an [`OsString`] containing an human-readable error.
-    pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
+    pub fn write(&mut self, buf: OsString) -> Result<u32, OsString> {
         self.pty.write(buf)
     }
 

@@ -5,6 +5,10 @@
 // Actual implementation if winpty is available
 #[cfg(feature="conpty")]
 mod pty_impl;
+mod calls;
+
+#[cfg(all(feature="conpty", feature="conpty_local"))]
+mod bindings;
 
 #[cfg(feature="conpty")]
 pub use pty_impl::ConPTY;

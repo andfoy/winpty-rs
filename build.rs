@@ -1,11 +1,15 @@
-#[cfg(windows)]
-use windows::Win32::System::LibraryLoader::{GetProcAddress, GetModuleHandleW};
-#[cfg(windows)]
-use windows::core::{PWSTR, PSTR, PCWSTR, PCSTR, HSTRING};
+use glob::glob;
+use std::env;
+use std::env::consts::ARCH;
 use std::i64;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str;
 use which::which;
+#[cfg(windows)]
+use windows::core::{HSTRING, PCSTR, PCWSTR, PSTR, PWSTR};
+#[cfg(windows)]
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
 #[cfg(windows)]
 trait IntoPWSTR {
@@ -30,10 +34,7 @@ trait IntoPCWSTR {
 #[cfg(windows)]
 impl IntoPCWSTR for &str {
     fn into_pcwstr(self) -> PCWSTR {
-        let encoded = self
-            .encode_utf16()
-            .chain([0u16])
-            .collect::<Vec<u16>>();
+        let encoded = self.encode_utf16().chain([0u16]).collect::<Vec<u16>>();
 
         PCWSTR(encoded.as_ptr())
     }
@@ -42,17 +43,15 @@ impl IntoPCWSTR for &str {
 #[cfg(windows)]
 impl IntoPWSTR for &str {
     fn into_pwstr(self) -> PWSTR {
-        let mut encoded = self
-            .encode_utf16()
-            .chain([0u16])
-            .collect::<Vec<u16>>();
+        let mut encoded = self.encode_utf16().chain([0u16]).collect::<Vec<u16>>();
 
-        PWSTR(encoded.as_mut_ptr())    }
+        PWSTR(encoded.as_mut_ptr())
+    }
 }
 
 #[cfg(windows)]
 impl IntoPSTR for &str {
-     fn into_pstr(self) -> PSTR {
+    fn into_pstr(self) -> PSTR {
         let mut encoded = self
             .as_bytes()
             .iter()
@@ -60,29 +59,28 @@ impl IntoPSTR for &str {
             .chain([0u8])
             .collect::<Vec<u8>>();
 
-        PSTR(encoded.as_mut_ptr())    }
+        PSTR(encoded.as_mut_ptr())
+    }
 }
 
 #[cfg(windows)]
 impl IntoPCSTR for &str {
     fn into_pcstr(self) -> PCSTR {
-       let encoded = self
-           .as_bytes()
-           .iter()
-           .cloned()
-           .chain([0u8])
-           .collect::<Vec<u8>>();
+        let encoded = self
+            .as_bytes()
+            .iter()
+            .cloned()
+            .chain([0u8])
+            .collect::<Vec<u8>>();
 
-       PCSTR(encoded.as_ptr())    }
+        PCSTR(encoded.as_ptr())
+    }
 }
 
 #[cfg(windows)]
 impl IntoPWSTR for String {
     fn into_pwstr(self) -> PWSTR {
-        let mut encoded = self
-            .encode_utf16()
-            .chain([0u16])
-            .collect::<Vec<u16>>();
+        let mut encoded = self.encode_utf16().chain([0u16]).collect::<Vec<u16>>();
 
         PWSTR(encoded.as_mut_ptr())
     }
@@ -101,6 +99,16 @@ fn command_output(cmd: &mut Command) -> String {
         .to_string()
 }
 
+fn get_output_path() -> PathBuf {
+    //<root or manifest path>/target/<profile>/
+    let manifest_dir_string = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let build_type = env::var("PROFILE").unwrap();
+    let path = Path::new(&manifest_dir_string)
+        .join("target")
+        .join(build_type);
+    return PathBuf::from(path);
+}
+
 fn main() {
     if std::env::var("DOCS_RS").is_ok() {
         return;
@@ -116,6 +124,10 @@ fn main() {
         // let include_path = Path::new(&manifest_dir).join("include");
         // CFG.exported_header_dirs.push(&include_path);
         // CFG.exported_header_dirs.push(&Path::new(&manifest_dir));
+        let conpty_enabled;
+
+        let current_path = env::current_dir().unwrap();
+
         // Check if ConPTY is enabled
         let reg_entry = "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
 
@@ -143,11 +155,11 @@ fn main() {
         println!("Windows major version: {:?}", major_version);
         println!("Windows build number: {:?}", build_version);
 
-        let conpty_enabled;
+        // let conpty_enabled;
         let kernel32_res = unsafe { GetModuleHandleW(&HSTRING::from("kernel32.dll")) };
         let kernel32 = kernel32_res.unwrap();
 
-        let conpty = unsafe { GetProcAddress(kernel32,  "CreatePseudoConsole".into_pcstr()) };
+        let conpty = unsafe { GetProcAddress(kernel32, "CreatePseudoConsole".into_pcstr()) };
         match conpty {
             Some(_) => {
                 conpty_enabled = "1";
@@ -159,6 +171,102 @@ fn main() {
         }
 
         println!("ConPTY enabled: {}", conpty_enabled);
+        // println!("ConPTY binaries found locally: {}", conpty_locally_enabled);
+
+        if conpty_enabled == "1" {
+            // Check if local ConPTY binaries are available
+            let current_path = env::current_dir().unwrap();
+            // let lib_path = current_path.join("lib");
+            let lib_path = get_output_path();
+
+            let mut binaries_found = true;
+            for bin_name in ["conpty.lib", "conpty.dll", "OpenConsole.exe"] {
+                let bin_path = lib_path.join(bin_name);
+                binaries_found = binaries_found && bin_path.exists();
+            }
+
+            let mut nuget;
+
+            if !binaries_found {
+                nuget = Command::new("nuget.exe");
+                let nuget_found = command_ok(nuget.arg("help"));
+
+                if !nuget_found {
+                    panic!("NuGet is required to build winpty-rs");
+                }
+
+                if command_ok(
+                     Command::new("nuget.exe")
+                        .current_dir(current_path.to_str().unwrap())
+                        .arg("install")
+                        .arg("Microsoft.Windows.Console.ConPTY"),
+                ) {
+                    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+                    let manifest_path = PathBuf::from(Path::new(&manifest_dir));
+                    for path in glob(
+                        manifest_path
+                            .join("Microsoft.Windows.Console.ConPTY*")
+                            .to_str()
+                            .unwrap(),
+                    )
+                    .unwrap()
+                    {
+                        match path {
+                            Ok(folder) => {
+                                use std::fs;
+
+                                let openconsole = folder
+                                    .join("build")
+                                    .join("native")
+                                    .join("runtimes")
+                                    .join("x64")
+                                    .join("OpenConsole.exe");
+
+                                let simplified_arch = match ARCH {
+                                    "x86_64" => "x64",
+                                    "arm" => "arm64",
+                                    _ => ARCH,
+                                };
+
+                                let binaries_path = folder
+                                    .join("runtimes")
+                                    .join(format!("win10-{}", simplified_arch));
+                                let dll_path = binaries_path.join("native").join("conpty.dll");
+                                let lib_orig =
+                                    binaries_path.join("lib").join("uap10.0").join("conpty.lib");
+
+                                let openconsole_dst = get_output_path().join("OpenConsole.exe");
+                                let dll_dst = get_output_path().join("conpty.dll");
+                                let lib_dst = get_output_path().join("conpty.lib");
+
+                                fs::copy(openconsole, openconsole_dst).unwrap();
+                                fs::copy(dll_path, dll_dst).unwrap();
+                                fs::copy(lib_orig, lib_dst).unwrap();
+                                binaries_found = true;
+                            }
+                            Err(err) => panic!("{:?}", err),
+                        }
+                    }
+                }
+            }
+
+            // let conpty_enabled;
+            if binaries_found {
+                println!("cargo:rustc-cfg=feature=\"conpty\"");
+                println!("cargo:rustc-cfg=feature=\"conpty_local\"");
+
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    lib_path.to_str().unwrap()
+                );
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    lib_path.to_str().unwrap()
+                );
+
+                println!("cargo:rustc-link-lib=dylib=conpty");
+            }
+        }
 
         // Check if winpty is installed
         let mut cmd = Command::new("winpty-agent");

@@ -20,7 +20,7 @@ impl PTYImpl for WinPTY {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
 
-    fn write(&self, _buf: OsString) -> Result<u32, OsString> {
+    fn write(&mut self, _buf: OsString) -> Result<u32, OsString> {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
 
