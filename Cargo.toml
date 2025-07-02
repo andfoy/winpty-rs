@@ -22,11 +22,13 @@ glob = "0.3.2"
 [dependencies.windows-strings]
 # path = "../windows-rs/crates/libs/strings"
 git = "https://github.com/andfoy/windows-rs.git"
+rev = "07b80e517ee42c86283163ff78032b2ab77eb19e"
 # version = "0.4"
 
 
 [dependencies.windows]
 git = "https://github.com/andfoy/windows-rs.git"
+rev = "07b80e517ee42c86283163ff78032b2ab77eb19e"
 features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -45,6 +47,7 @@ features = [
 
 [build-dependencies.windows]
 git = "https://github.com/andfoy/windows-rs.git"
+rev = "07b80e517ee42c86283163ff78032b2ab77eb19e"
 features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader"
