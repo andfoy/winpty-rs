@@ -563,7 +563,7 @@ impl PTYImpl for ConPTY {
         self.process.read(blocking)
     }
 
-    fn write(&mut self, buf: OsString) -> Result<u32, OsString> {
+    fn write(&self, buf: OsString) -> Result<u32, OsString> {
         self.process.write(buf)
     }
 
@@ -589,6 +589,10 @@ impl PTYImpl for ConPTY {
 
     fn wait_for_exit(&self) -> Result<bool, OsString> {
         self.process.wait_for_exit()
+    }
+
+    fn cancel_io(&self) -> Result<bool, OsString> {
+        self.process.cancel_io()
     }
 }
 

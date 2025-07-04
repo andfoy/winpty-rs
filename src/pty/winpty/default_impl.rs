@@ -20,7 +20,7 @@ impl PTYImpl for WinPTY {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
 
-    fn write(&mut self, _buf: OsString) -> Result<u32, OsString> {
+    fn write(&self, _buf: OsString) -> Result<u32, OsString> {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
 
@@ -45,6 +45,10 @@ impl PTYImpl for WinPTY {
     }
 
     fn wait_for_exit(&self) -> Result<bool, OsString> {
+        Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
+    }
+
+    fn cancel_io(&self) -> Result<bool, OsString> {
         Err(OsString::from("winpty_rs was compiled without WinPTY enabled"))
     }
 }

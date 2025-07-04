@@ -273,7 +273,7 @@ impl PTY {
     /// # Returns
     /// The total number of characters written if the call was successful, else
     /// an [`OsString`] containing an human-readable error.
-    pub fn write(&mut self, buf: OsString) -> Result<u32, OsString> {
+    pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
         self.pty.write(buf)
     }
 
@@ -312,5 +312,10 @@ impl PTY {
 	/// Wait for the process to exit/finish.
     pub fn wait_for_exit(&self) -> Result<bool, OsString> {
 		self.pty.wait_for_exit()
+	}
+
+	/// Cancel all pending reading I/O operations.
+	pub fn cancel_io(&self) -> Result<bool, OsString> {
+		self.pty.cancel_io()
 	}
 }

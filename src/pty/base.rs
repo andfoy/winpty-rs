@@ -137,7 +137,7 @@ pub trait PTYImpl: Sync + Send {
     /// # Returns
     /// The total number of characters written if the call was successful, else
     /// an [`OsString`] containing an human-readable error.
-    fn write(&mut self, buf: OsString) -> Result<u32, OsString>;
+    fn write(&self, buf: OsString) -> Result<u32, OsString>;
 
     /// Check if a process reached End-of-File (EOF).
     ///
@@ -163,7 +163,11 @@ pub trait PTYImpl: Sync + Send {
 
     /// Wait for the process to exit/finish.
     fn wait_for_exit(&self) -> Result<bool, OsString>;
+
+    /// Cancel all pending I/O read operations.
+    fn cancel_io(&self) -> Result<bool, OsString>;
 }
+
 
 fn read(
     blocking: bool,
@@ -621,7 +625,7 @@ impl PTYProcess {
     /// # Returns
     /// The total number of characters written if the call was successful, else
     /// an [`OsString`] containing an human-readable error.
-    pub fn write(&mut self, buf: OsString) -> Result<u32, OsString> {
+    pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
         const BUFFER_SIZE: usize = 8192;
         let vec_buf: Vec<u16> = buf.encode_wide().collect();
 
@@ -654,13 +658,13 @@ impl PTYProcess {
             let bytes_ref = Some(bytes_ptr);
 
             let c_mutex = Arc::clone(&self.write_mutex);
-            let _mutex_guard = *c_mutex.lock().unwrap();
+            let mut write_pending = c_mutex.lock().unwrap();
 
             // Write in chunks
             for chunk in bytes_buf.chunks(BUFFER_SIZE) {
                 if self.async_ {
-                    if self.write_pending {
-                        self.write_pending = false;
+                    if *write_pending {
+                        *write_pending = false;
                         if GetOverlappedResult(
                             Into::<HANDLE>::into(self.conin),
                             &mut self.write_overlapped.unwrap(),
@@ -690,7 +694,7 @@ impl PTYProcess {
                     } else {
                         let err = Error::from_win32();
                         if err.code() == ERROR_IO_PENDING.into() {
-                            self.write_pending = true;
+                            *write_pending = true;
                             S_OK
                         } else {
                             Error::from_win32().into()
@@ -829,6 +833,21 @@ impl PTYProcess {
     /// Wait for the process to exit
     pub fn wait_for_exit(&self) -> Result<bool, OsString> {
         wait_for_exit(self.process.into())
+    }
+
+    /// Cancel all pending I/O operations
+    pub fn cancel_io(&self) -> Result<bool, OsString> {
+        unsafe {
+            if CancelIoEx(Into::<HANDLE>::into(self.conout), None).is_ok() {
+                Ok(true)
+            } else {
+                let result: HRESULT = Error::from_win32().into();
+                let result_msg = result.message();
+                let string = OsString::from(result_msg);
+                Err(string)
+            }
+
+        }
     }
 }
 
