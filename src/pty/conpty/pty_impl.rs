@@ -41,7 +41,7 @@ use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::{mem, ptr, thread};
 
-use super::calls::{ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole};
+use super::calls::{ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, ShowHidePseudoConsole};
 use crate::pty::PTYArgs;
 use crate::pty::{PTYImpl, PTYProcess};
 
@@ -407,6 +407,8 @@ impl PTYImpl for ConPTY {
                     return Err(string);
                 }
             };
+
+            let _ = ShowHidePseudoConsole(pty_handle, false);
 
             // let _ = CloseHandle(input_read_side);
             // let _ = CloseHandle(output_write_side);

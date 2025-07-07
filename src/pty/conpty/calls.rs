@@ -16,7 +16,7 @@ pub use windows::Win32::System::Console::{CreatePseudoConsole, ResizePseudoConso
 #[cfg(all(feature = "conpty", feature = "conpty_local"))]
 use super::bindings::{
     ConptyClearPseudoConsole, ConptyClosePseudoConsole, ConptyCreatePseudoConsole,
-    ConptyResizePseudoConsole,
+    ConptyResizePseudoConsole, ConptyShowHidePseudoConsole,
 };
 
 #[cfg(all(feature = "conpty", feature = "conpty_local"))]
@@ -71,6 +71,18 @@ pub unsafe fn ClearPseudoConsole(hPC: HPCON) -> Result<()> {
 #[cfg(all(feature = "conpty", feature = "conpty_local"))]
 pub unsafe fn ClosePseudoConsole(hPC: HPCON) -> Result<()> {
     let result_code = ConptyClosePseudoConsole(hPC.0 as *mut c_void);
+
+    let result = HRESULT::from_nt(result_code);
+    if result.is_err() {
+        Err(Error::from_hresult(result))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(feature = "conpty", feature = "conpty_local"))]
+pub unsafe fn ShowHidePseudoConsole(hPC: HPCON, show: bool) -> Result<()> {
+    let result_code = ConptyShowHidePseudoConsole(hPC.0 as *mut c_void, show);
 
     let result = HRESULT::from_nt(result_code);
     if result.is_err() {
