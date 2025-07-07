@@ -168,7 +168,6 @@ pub trait PTYImpl: Sync + Send {
     fn cancel_io(&self) -> Result<bool, OsString>;
 }
 
-
 fn read(
     blocking: bool,
     stream: HANDLE,
@@ -407,6 +406,8 @@ pub struct PTYProcess {
     close_process: bool,
     /// Handle to the thread used to read from the standard output.
     reading_thread: Option<thread::JoinHandle<()>>,
+    /// Handle to the thread used to check if the process is alive.
+    alive_thread: Option<thread::JoinHandle<()>>,
     /// Channel used to keep the thread alive.
     reader_alive: mpsc::Sender<bool>,
     /// Atomic variable to signal when a thread finishes
@@ -443,6 +444,7 @@ impl PTYProcess {
         conout: LocalHandle,
         using_pipes: bool,
         async_: bool,
+        cleanup_tx: Option<mpsc::Sender<bool>>
     ) -> PTYProcess {
         let thread_arc = Arc::new(AtomicBool::new(true));
         let reader_arc = Arc::new(AtomicBool::new(false));
@@ -491,6 +493,7 @@ impl PTYProcess {
                 pid: 0,
                 close_process: true,
                 reading_thread: Some(reader_thread),
+                alive_thread: None,
                 reader_alive: reader_alive_tx,
                 reader_atomic: thread_arc,
                 reader_process_out: reader_process_tx,
@@ -519,6 +522,7 @@ impl PTYProcess {
             let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<LocalHandle>>();
             let spinlock_clone = Arc::clone(&thread_arc);
             let reader_ready = Arc::clone(&reader_arc);
+            let (reader_process_2_tx, reader_process_2_rx) = mpsc::channel::<LocalHandle>();
 
             let reader_thread = thread::spawn(move || {
                 let mut read_overlapped = OVERLAPPED::default();
@@ -536,11 +540,17 @@ impl PTYProcess {
                 let process_result = reader_process_rx.recv();
                 if let Ok(Some(process)) = process_result {
                     reader_ready.store(true, Ordering::Release);
+                    let _ = reader_process_2_tx.send(process);
                     let mut alive = true;
                     while alive {
-                        match get_exitstatus(process.into()) {
-                            Ok(None) => {
-                                match read(true, conout.into(), using_pipes, Some(&mut read_overlapped)) {
+                        // match get_exitstatus(process.into()) {
+                            // Ok(None) => {
+                                match read(
+                                    true,
+                                    conout.into(),
+                                    using_pipes,
+                                    Some(&mut read_overlapped),
+                                ) {
                                     Ok((result, alive_status)) => {
                                         reader_out_tx.send(Some(Ok(result))).unwrap();
                                         alive = alive_status;
@@ -550,23 +560,44 @@ impl PTYProcess {
                                         alive = false;
                                     }
                                 }
-                            }
-                            Ok(_) => {
-                                reader_out_tx.send(None).unwrap();
-                            }
-                            Err(err) => {
-                                reader_out_tx.send(Some(Err(err))).unwrap();
-                                alive = false;
-                            }
-                        }
+                            // }
+                        //     Ok(_) => {
+                        //         reader_out_tx.send(None).unwrap();
+                        //         alive = false;
+                        //     }
+                        //     Err(err) => {
+                        //         reader_out_tx.send(Some(Err(err))).unwrap();
+                        //         alive = false;
+                        //     }
+                        // }
                     }
 
+                    unsafe {
+                        let _ = CloseHandle(read_overlapped.hEvent);
+                    }
                     spinlock_clone.store(false, Ordering::Release);
                 }
 
                 drop(reader_process_rx);
                 drop(reader_alive_rx);
                 drop(reader_out_tx);
+                drop(reader_process_2_tx);
+            });
+
+            let alive_thread = thread::spawn(move || {
+                if let Ok(handle) = reader_process_2_rx.recv() {
+                    let _ = wait_for_exit(handle.into());
+                    unsafe {
+                        let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
+                        match cleanup_tx {
+                            None => (),
+                            Some(tx) => {
+                                let _ = tx.send(true).unwrap_or(());
+                            }
+                        }
+                    }
+                }
+                drop(reader_process_2_rx);
             });
 
             PTYProcess {
@@ -576,6 +607,7 @@ impl PTYProcess {
                 pid: 0,
                 close_process: true,
                 reading_thread: Some(reader_thread),
+                alive_thread: Some(alive_thread),
                 reader_alive: reader_alive_tx,
                 reader_atomic: thread_arc,
                 reader_process_out: reader_process_tx,
@@ -846,7 +878,6 @@ impl PTYProcess {
                 let string = OsString::from(result_msg);
                 Err(string)
             }
-
         }
     }
 }
@@ -865,14 +896,12 @@ impl Drop for PTYProcess {
 
                 // Send instruction to thread to finish
                 if self.reader_alive.send(false).is_ok() {}
-
             }
 
             // Wait for the thread to be down
             if let Some(thread_handle) = self.reading_thread.take() {
                 thread_handle.join().unwrap();
             }
-
 
             if !self.conin.is_invalid() {
                 let _ = CloseHandle(Into::<HANDLE>::into(self.conin));
@@ -884,6 +913,10 @@ impl Drop for PTYProcess {
 
             if self.close_process && !self.process.is_invalid() {
                 let _ = CloseHandle(Into::<HANDLE>::into(self.process));
+            }
+
+            if let Some(thread_handle) = self.alive_thread.take() {
+                thread_handle.join().unwrap_or(());
             }
         }
     }

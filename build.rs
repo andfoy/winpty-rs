@@ -175,9 +175,15 @@ fn main() {
 
         if conpty_enabled == "1" {
             // Check if local ConPTY binaries are available
+
+            use std::fs;
             let current_path = env::current_dir().unwrap();
             // let lib_path = current_path.join("lib");
             let lib_path = get_output_path();
+            if !fs::exists(&lib_path).unwrap() {
+                fs::create_dir_all(&lib_path).unwrap();
+            }
+
 
             let mut binaries_found = true;
             for bin_name in ["conpty.lib", "conpty.dll", "OpenConsole.exe"] {
@@ -215,18 +221,20 @@ fn main() {
                             Ok(folder) => {
                                 use std::fs;
 
-                                let openconsole = folder
-                                    .join("build")
-                                    .join("native")
-                                    .join("runtimes")
-                                    .join("x64")
-                                    .join("OpenConsole.exe");
-
                                 let simplified_arch = match ARCH {
                                     "x86_64" => "x64",
                                     "arm" => "arm64",
                                     _ => ARCH,
                                 };
+
+                                println!("{:?}", folder);
+                                println!("{:?}", get_output_path());
+                                let openconsole = folder
+                                    .join("build")
+                                    .join("native")
+                                    .join("runtimes")
+                                    .join(simplified_arch)
+                                    .join("OpenConsole.exe");
 
                                 let binaries_path = folder
                                     .join("runtimes")
