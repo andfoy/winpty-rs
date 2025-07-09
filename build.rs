@@ -171,6 +171,7 @@ fn main() {
         }
 
         println!("ConPTY enabled: {}", conpty_enabled);
+        println!("Output path: {}", get_output_path().to_str().unwrap());
         // println!("ConPTY binaries found locally: {}", conpty_locally_enabled);
 
         if conpty_enabled == "1" {
