@@ -106,7 +106,7 @@ fn set_size_conpty() {
     pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
     let regex = Regex::new(r".*Width.*").unwrap();
     let mut output_str = "";
-    let mut out: OsString;
+    let mut out = OsString::new();
 
     while !regex.is_match(output_str) {
         out = pty.read(false).unwrap();
@@ -114,8 +114,9 @@ fn set_size_conpty() {
     }
 
     let mut collect_vec: Vec<String> = Vec::new();
-    let num_regex = Regex::new(r"\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
-    let mut collected_str = String::new();
+    let num_regex = Regex::new(r".*\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
+    let mut collected_str = out.into_string().unwrap();
+    collect_vec.push(collected_str.clone());
 
     while !num_regex.is_match(&collected_str) {
         let out = pty.read(false).unwrap();
@@ -150,7 +151,7 @@ fn set_size_conpty() {
         pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
         let regex = Regex::new(r".*Width.*").unwrap();
         let mut output_str = "";
-        let mut out: OsString;
+        let mut out = OsString::new();;
 
         while !regex.is_match(output_str) {
             out = pty.read(false).unwrap();
@@ -160,8 +161,9 @@ fn set_size_conpty() {
         println!("{:?}", output_str);
 
         let mut collect_vec: Vec<String> = Vec::new();
-        let num_regex = Regex::new(r"\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
-        let mut collected_str = String::new();
+        let num_regex = Regex::new(r".*\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
+        let mut collected_str = out.into_string().unwrap();
+        collect_vec.push(collected_str.clone());
 
         while !num_regex.is_match(&collected_str) {
             let out = pty.read(false).unwrap();
