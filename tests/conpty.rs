@@ -47,7 +47,7 @@ fn read_write_conpty() {
     let mut out: OsString;
     let mut tries = 0;
 
-    sleep(Duration::from_millis(10000));
+    sleep(Duration::from_millis(5000));
 
     pty.write("\r\n".into()).unwrap();
 
@@ -101,7 +101,7 @@ fn set_size_conpty() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
-    sleep(Duration::from_millis(10000));
+    sleep(Duration::from_millis(5000));
 
     pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
     let regex = Regex::new(r".*Width.*").unwrap();
@@ -113,17 +113,22 @@ fn set_size_conpty() {
         output_str = out.to_str().unwrap();
     }
 
-    let parts: Vec<&str> = output_str.split("\r\n").collect();
-    let num_regex = Regex::new(r"\s+(\d+)\s+(\d+).*").unwrap();
+    let mut collect_vec: Vec<String> = Vec::new();
+    let num_regex = Regex::new(r"\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
+    let mut collected_str = String::new();
+
+    while !num_regex.is_match(&collected_str) {
+        let out = pty.read(false).unwrap();
+        collect_vec.push(out.into_string().unwrap());
+        collected_str = collect_vec.join("");
+    }
+
     let mut rows: i32 = -1;
     let mut cols: i32 = -1;
-    for part in parts {
-        if num_regex.is_match(part) {
-            for cap in num_regex.captures_iter(part) {
-                cols = cap[1].parse().unwrap();
-                rows = cap[2].parse().unwrap();
-            }
-        }
+
+    for cap in num_regex.captures_iter(&collected_str) {
+        cols = cap[1].parse().unwrap();
+        rows = cap[2].parse().unwrap();
     }
 
     assert_eq!(rows, pty_args.rows);
@@ -154,15 +159,19 @@ fn set_size_conpty() {
 
         println!("{:?}", output_str);
 
-        let parts: Vec<&str> = output_str.split("\r\n").collect();
-        let num_regex = Regex::new(r"\s+(\d+)\s+(\d+).*").unwrap();
-        for part in parts {
-            if num_regex.is_match(part) {
-                for cap in num_regex.captures_iter(part) {
-                    cols = cap[1].parse().unwrap();
-                    rows = cap[2].parse().unwrap();
-                }
-            }
+        let mut collect_vec: Vec<String> = Vec::new();
+        let num_regex = Regex::new(r"\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
+        let mut collected_str = String::new();
+
+        while !num_regex.is_match(&collected_str) {
+            let out = pty.read(false).unwrap();
+            collect_vec.push(out.into_string().unwrap());
+            collected_str = collect_vec.join("");
+        }
+
+        for cap in num_regex.captures_iter(&collected_str) {
+            cols = cap[1].parse().unwrap();
+            rows = cap[2].parse().unwrap();
         }
 
         count += 1;
@@ -186,7 +195,7 @@ fn is_alive_exitstatus_conpty() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
-    sleep(Duration::from_millis(10000));
+    sleep(Duration::from_millis(5000));
 
     pty.write("echo wait\r\n".into()).unwrap();
     assert!(pty.is_alive().unwrap());
@@ -214,7 +223,7 @@ fn wait_for_exit() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
-    sleep(Duration::from_millis(10000));
+    sleep(Duration::from_millis(5000));
 
     pty.write("echo wait\r\n".into()).unwrap();
     assert!(pty.is_alive().unwrap());
@@ -241,21 +250,30 @@ fn check_eof_output() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, Some(OsString::from("-c \"print(\';\'.join([str(i) for i in range(0, 2048)]))\"")), None, None).unwrap();
     assert!(pty.is_alive().unwrap());
-    sleep(Duration::from_millis(10000));
+    sleep(Duration::from_millis(5000));
 
     let mut collect_vec: Vec<String> = Vec::new();
     let mut valid = true;
 
     while valid {
-        let out_wrapped = pty.read(false);
+        let out_wrapped = pty.read(true);
         match out_wrapped {
-            Ok(out) => collect_vec.push(out.into_string().unwrap()),
+            Ok(out) =>{
+                println!("{:?}", out);
+                collect_vec.push(out.clone().into_string().unwrap());
+                if out.is_empty() && !pty.is_eof().unwrap() {
+                    valid = false;
+                }
+            },
             Err(_) => {valid = false;}
         }
+
+        // valid = valid && !pty.is_eof().unwrap();
     }
 
     let output_str = collect_vec.join("");
-    assert!(output_str.ends_with("2047"));
+    println!("{:?}", output_str);
+    assert!(output_str.ends_with("2047\r\n"));
 
     println!("{:?}", output_str);
     let _ = pty.wait_for_exit();

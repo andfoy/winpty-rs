@@ -424,8 +424,6 @@ pub struct PTYProcess {
     write_overlapped: Option<OVERLAPPED>,
     /// Write mutex for concurrent access under async IO
     write_mutex: Arc<Mutex<bool>>,
-    /// Asynchronous writing is still in progress
-    write_pending: bool,
 }
 
 impl PTYProcess {
@@ -444,7 +442,7 @@ impl PTYProcess {
         conout: LocalHandle,
         using_pipes: bool,
         async_: bool,
-        cleanup_tx: Option<mpsc::Sender<bool>>
+        cleanup_tx: Option<mpsc::Sender<bool>>,
     ) -> PTYProcess {
         let thread_arc = Arc::new(AtomicBool::new(true));
         let reader_arc = Arc::new(AtomicBool::new(false));
@@ -502,7 +500,6 @@ impl PTYProcess {
                 async_,
                 write_overlapped: None,
                 write_mutex: Arc::new(Mutex::new(false)),
-                write_pending: false,
             }
         } else {
             let mut write_overlapped = OVERLAPPED::default();
@@ -543,33 +540,16 @@ impl PTYProcess {
                     let _ = reader_process_2_tx.send(process);
                     let mut alive = true;
                     while alive {
-                        // match get_exitstatus(process.into()) {
-                            // Ok(None) => {
-                                match read(
-                                    true,
-                                    conout.into(),
-                                    using_pipes,
-                                    Some(&mut read_overlapped),
-                                ) {
-                                    Ok((result, alive_status)) => {
-                                        reader_out_tx.send(Some(Ok(result))).unwrap();
-                                        alive = alive_status;
-                                    }
-                                    Err(err) => {
-                                        reader_out_tx.send(Some(Err(err))).unwrap();
-                                        alive = false;
-                                    }
-                                }
-                            // }
-                        //     Ok(_) => {
-                        //         reader_out_tx.send(None).unwrap();
-                        //         alive = false;
-                        //     }
-                        //     Err(err) => {
-                        //         reader_out_tx.send(Some(Err(err))).unwrap();
-                        //         alive = false;
-                        //     }
-                        // }
+                        match read(true, conout.into(), using_pipes, Some(&mut read_overlapped)) {
+                            Ok((result, alive_status)) => {
+                                reader_out_tx.send(Some(Ok(result))).unwrap();
+                                alive = alive_status;
+                            }
+                            Err(err) => {
+                                reader_out_tx.send(Some(Err(err))).unwrap();
+                                alive = false;
+                            }
+                        }
                     }
 
                     unsafe {
@@ -584,14 +564,18 @@ impl PTYProcess {
                 drop(reader_process_2_tx);
             });
 
+            let alive_reader_atomic = Arc::clone(&thread_arc);
             let alive_thread = thread::spawn(move || {
                 if let Ok(handle) = reader_process_2_rx.recv() {
                     let _ = wait_for_exit(handle.into());
                     unsafe {
-                        let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
+                        while alive_reader_atomic.load(Ordering::Acquire) {
+                            let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
+                        }
                         match cleanup_tx {
                             None => (),
                             Some(tx) => {
+                                // alive_tx.send(false);
                                 let _ = tx.send(true).unwrap_or(());
                             }
                         }
@@ -616,7 +600,6 @@ impl PTYProcess {
                 async_,
                 write_overlapped: Some(write_overlapped),
                 write_mutex: Arc::new(Mutex::new(false)),
-                write_pending: false,
             }
         }
     }
