@@ -48,7 +48,7 @@ jobs:
                 auto-update-conda: true
                 activate-environment: test
                 channels: conda-forge,defaults
-                python-version: 3.10
+                python-version: '3.10'
             - name: Conda env info
               shell: bash -l {0}
               run: conda env list
