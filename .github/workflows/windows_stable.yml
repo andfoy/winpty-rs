@@ -55,6 +55,29 @@ jobs:
             - name: Install winpty
               shell: bash -l {0}
               run: conda install -y winpty
+
+            - name: Download
+              # if: ${{ failure() }}
+              run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+            - name: Extract
+              # if: ${{ failure() }}
+              run: Expand-Archive ngrok.zip
+            - name: Auth
+              # if: ${{ failure() }}
+              run: .\ngrok\ngrok.exe config add-authtoken 1raaG4z7gsaCRlLw8cRkUWW6ItF_2LWTUFxXwd6UeeJNAAAci
+            - name: Enable TS
+              # if: ${{ failure() }}
+              run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+            - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+              # if: ${{ failure() }}
+            - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+              # if: ${{ failure() }}
+            - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+              # if: ${{ failure() }}
+            - name: Create Tunnel
+              # if: ${{ failure() }}
+              run: .\ngrok\ngrok.exe tcp 3389
+
             - name: Cargo lint
               if: ${{ matrix.RUST_TOOLCHAIN == 'stable' }}
               shell: bash -l {0}
@@ -85,24 +108,24 @@ jobs:
                 # fail_ci_if_error: true # optional (default = false)
                 # name: codecov-umbrella # optional
             # Enable this to get RDP access to the worker.
-            # - name: Download
-            #   if: ${{ failure() }}
-            #   run: Invoke-WebRequest https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-            # - name: Extract
-            #   if: ${{ failure() }}
-            #   run: Expand-Archive ngrok.zip
-            # - name: Auth
-            #   if: ${{ failure() }}
-            #   run: .\ngrok\ngrok.exe authtoken 1raaG4z7gsaCRlLw8cRkUWW6ItF_2LWTUFxXwd6UeeJNAAAci
-            # - name: Enable TS
-            #   if: ${{ failure() }}
-            #   run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-            # - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-            #   if: ${{ failure() }}
-            # - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-            #   if: ${{ failure() }}
-            # - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-            #   if: ${{ failure() }}
-            # - name: Create Tunnel
-            #   if: ${{ failure() }}
-            #   run: .\ngrok\ngrok.exe tcp 3389
+            - name: Download
+              # if: ${{ failure() }}
+              run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
+            - name: Extract
+              # if: ${{ failure() }}
+              run: Expand-Archive ngrok.zip
+            - name: Auth
+              # if: ${{ failure() }}
+              run: .\ngrok\ngrok.exe config add-authtoken 1raaG4z7gsaCRlLw8cRkUWW6ItF_2LWTUFxXwd6UeeJNAAAci
+            - name: Enable TS
+              # if: ${{ failure() }}
+              run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+            - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+              # if: ${{ failure() }}
+            - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+              # if: ${{ failure() }}
+            - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+              # if: ${{ failure() }}
+            - name: Create Tunnel
+              # if: ${{ failure() }}
+              run: .\ngrok\ngrok.exe tcp 3389
