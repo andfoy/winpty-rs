@@ -32,6 +32,8 @@ use std::os::windows::prelude::*;
 #[cfg(unix)]
 use std::vec::IntoIter;
 
+use crossbeam_channel::{unbounded, Sender, Receiver};
+
 use super::PTYArgs;
 
 #[cfg(unix)]
@@ -409,15 +411,15 @@ pub struct PTYProcess {
     /// Handle to the thread used to check if the process is alive.
     alive_thread: Option<thread::JoinHandle<()>>,
     /// Channel used to keep the thread alive.
-    reader_alive: mpsc::Sender<bool>,
+    reader_alive: Sender<bool>,
     /// Atomic variable to signal when a thread finishes
     reader_atomic: Arc<AtomicBool>,
     /// Channel used to send the process handle to the reading thread.
-    reader_process_out: mpsc::Sender<Option<LocalHandle>>,
+    reader_process_out: Sender<Option<LocalHandle>>,
     /// Atomic flag to signal that the reading process has the process handle.
     reader_ready: Arc<AtomicBool>,
     /// Channel used to receive a response from the reading thread.
-    reader_out_rx: mpsc::Receiver<Option<Result<OsString, OsString>>>,
+    reader_out_rx: Receiver<Option<Result<OsString, OsString>>>,
     /// PTY process is async
     async_: bool,
     /// Writing OVERLAPPED struct for async operation
@@ -449,9 +451,10 @@ impl PTYProcess {
         if !async_ {
             // Keep only the reading thread channel
             let (reader_out_tx, reader_out_rx) =
-                mpsc::channel::<Option<Result<OsString, OsString>>>();
-            let (reader_alive_tx, reader_alive_rx) = mpsc::channel::<bool>();
-            let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<LocalHandle>>();
+                unbounded::
+                <Option<Result<OsString, OsString>>>();
+            let (reader_alive_tx, reader_alive_rx) = unbounded::<bool>();
+            let (reader_process_tx, reader_process_rx) = unbounded::<Option<LocalHandle>>();
             let spinlock_clone = Arc::clone(&thread_arc);
             let reader_ready = Arc::clone(&reader_arc);
 
@@ -514,12 +517,12 @@ impl PTYProcess {
             }
 
             let (reader_out_tx, reader_out_rx) =
-                mpsc::channel::<Option<Result<OsString, OsString>>>();
-            let (reader_alive_tx, reader_alive_rx) = mpsc::channel::<bool>();
-            let (reader_process_tx, reader_process_rx) = mpsc::channel::<Option<LocalHandle>>();
+                unbounded::<Option<Result<OsString, OsString>>>();
+            let (reader_alive_tx, reader_alive_rx) = unbounded::<bool>();
+            let (reader_process_tx, reader_process_rx) = unbounded::<Option<LocalHandle>>();
             let spinlock_clone = Arc::clone(&thread_arc);
             let reader_ready = Arc::clone(&reader_arc);
-            let (reader_process_2_tx, reader_process_2_rx) = mpsc::channel::<LocalHandle>();
+            let (reader_process_2_tx, reader_process_2_rx) = unbounded::<LocalHandle>();
 
             let reader_thread = thread::spawn(move || {
                 let mut read_overlapped = OVERLAPPED::default();
@@ -773,7 +776,7 @@ impl PTYProcess {
 
             if succ {
                 let is_alive = match self.is_alive() {
-                    Ok(alive) => alive,
+                    Ok(alive) => alive || !self.reader_out_rx.is_empty(),
                     Err(err) => {
                         return Err(err);
                     }

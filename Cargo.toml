@@ -14,6 +14,7 @@ keywords = ["windows", "pty", "winpty", "conpty", "pseudoterminal"]
 enum-primitive-derive = "0.3.0"
 num-traits = "0.2"
 bitflags = "2.3"
+crossbeam-channel = "0.5.15"
 
 [build-dependencies]
 which = "7.0.0"

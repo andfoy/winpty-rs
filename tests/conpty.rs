@@ -101,7 +101,9 @@ fn set_size_conpty() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
-    sleep(Duration::from_millis(5000));
+    pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
+
+    // sleep(Duration::from_millis(5000));
 
     pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
     let regex = Regex::new(r".*Width.*").unwrap();
@@ -151,7 +153,7 @@ fn set_size_conpty() {
         pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
         let regex = Regex::new(r".*Width.*").unwrap();
         let mut output_str = "";
-        let mut out = OsString::new();;
+        let mut out = OsString::new();
 
         while !regex.is_match(output_str) {
             out = pty.read(false).unwrap();
@@ -196,8 +198,9 @@ fn is_alive_exitstatus_conpty() {
     let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
+    pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
-    sleep(Duration::from_millis(5000));
+    // sleep(Duration::from_millis(5000));
 
     pty.write("echo wait\r\n".into()).unwrap();
     assert!(pty.is_alive().unwrap());
@@ -224,8 +227,9 @@ fn wait_for_exit() {
     let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
+    pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
-    sleep(Duration::from_millis(5000));
+    // sleep(Duration::from_millis(5000));
 
     pty.write("echo wait\r\n".into()).unwrap();
     assert!(pty.is_alive().unwrap());
@@ -252,7 +256,8 @@ fn check_eof_output() {
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, Some(OsString::from("-c \"print(\';\'.join([str(i) for i in range(0, 2048)]))\"")), None, None).unwrap();
     assert!(pty.is_alive().unwrap());
-    sleep(Duration::from_millis(5000));
+    pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
+    // sleep(Duration::from_millis(5000));
 
     let mut collect_vec: Vec<String> = Vec::new();
     let mut valid = true;
