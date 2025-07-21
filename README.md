@@ -97,6 +97,16 @@ let is_alive = pty.is_alive().unwrap();
 let exit_status = pty.get_exitstatus().unwrap();
 ```
 
+## Important notes
+winpty-rs provides bindings to backend libraries that are intented to **interact** with Virtual Terminal applications
+(i.e., programs that expect interactive I/O) and while it can be used to spawn and communicate from/to Windows process in a headless fashion,
+output produced may contain VT100 ANSI escape sequences that **must** be handled in many cases by the final client, therefore, timeouts and
+other kind of unexpected behaviour caused due to non-handling of escape sequences is solely responsibility of the end user of this library.
+
+For example, the escape sequence `\x1b[5n` (devstat) expects a response with the current status of the terminal in the form of `\x1b[0n`. Similarly,
+the request `\x1b[6n` expects a response containing the current cursor position in the form `\x1b[v;h r`, backends such as ConPTY may hang waiting
+for the response of such requests.
+
 ## Examples
 Please checkout the examples provided under the [examples](src/examples) folder, we provide examples for both
 ConPTY and WinPTY. In order to compile these examples, you can enable the `conpty_example` and `winpty_example`
