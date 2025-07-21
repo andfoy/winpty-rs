@@ -27,9 +27,10 @@ jobs:
               uses: conda-incubator/setup-miniconda@v3
               with:
                 auto-update-conda: true
+                miniforge-version: latest
                 activate-environment: test
-                channels: conda-forge,defaults
-                python-version: 3.7
+                # channels: conda-forge,defaults
+                python-version: "3.9"
             - uses: nuget/setup-nuget@v2
               with:
                 nuget-version: '5.x'
