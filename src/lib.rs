@@ -37,6 +37,7 @@ mod tests {
         // Spawn cmd.exe
         let cmd = OsString::from("c:\\windows\\system32\\cmd.exe");
         pty.spawn(cmd, None, None, None).unwrap();
+        pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
         // Wait for process to start
         sleep(Duration::from_millis(1000));
@@ -74,6 +75,7 @@ mod tests {
         // Spawn cmd.exe with a command that produces continuous output
         let cmd = OsString::from("c:\\windows\\system32\\cmd.exe");
         pty.spawn(cmd, Some("/c echo test".into()), None, None).unwrap();
+        pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
         // Wait for process to start
         sleep(Duration::from_millis(1000));
@@ -135,6 +137,8 @@ mod tests {
             None,
             None
         ).unwrap();
+
+        pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
         // Wait for process to start
         std::thread::sleep(std::time::Duration::from_millis(100));

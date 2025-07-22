@@ -22,6 +22,7 @@ fn spawn_conpty() {
     let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
+    pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
     let ten_millis = time::Duration::from_millis(10);
     thread::sleep(ten_millis);
@@ -40,6 +41,7 @@ fn read_write_conpty() {
     let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
+    pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
     let re_pattern: &str = r".*Microsoft Windows.*";
     let regex = Regex::new(re_pattern).unwrap();

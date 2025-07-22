@@ -463,7 +463,7 @@ impl PTYProcess {
                 if let Ok(Some(process)) = process_result {
                     reader_ready.store(true, Ordering::Release);
                     while reader_alive_rx
-                        .recv_timeout(Duration::from_micros(100))
+                        .try_recv()
                         .unwrap_or(true)
                     {
                         if !is_eof(process.into(), conout.into()).unwrap() {
@@ -627,7 +627,7 @@ impl PTYProcess {
                 Ok(Some(bytes)) => bytes,
                 Err(_) => Ok(OsString::new()),
             },
-            false => match self.reader_out_rx.recv_timeout(Duration::from_micros(200)) {
+            false => match self.reader_out_rx.try_recv() {
                 Ok(None) => Err(OsString::from("Standard out reached EOF")),
                 Ok(Some(bytes)) => bytes,
                 Err(_) => Ok(OsString::new()),
