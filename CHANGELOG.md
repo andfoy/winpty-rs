@@ -1,3 +1,13 @@
+## Version 1.0.0 (2025/07/25)
+
+
+### Pull Requests Merged
+
+* [PR 96](https://github.com/andfoy/winpty-rs/pull/96) - Replace ConPTY synchronous pipes by async ones, by [@andfoy](https://github.com/andfoy) ([93](https://github.com/andfoy/winpty-rs/issues/93), [490](https://github.com/andfoy/pywinpty/issues/490), [484](https://github.com/andfoy/pywinpty/issues/484))
+
+In this release 1 pull request was closed.
+
+
 ## Version 0.4.0 (2024/10/17)
 
 ### Issues Closed
