@@ -21,15 +21,16 @@ which = "7.0.0"
 glob = "0.3.2"
 
 [dependencies.windows-strings]
-# path = "../windows-rs/crates/libs/strings"
-git = "https://github.com/andfoy/windows-rs.git"
-rev = "07b80e517ee42c86283163ff78032b2ab77eb19e"
-# version = "0.4"
+version = "0.4"
 
+[dependencies.windows-link]
+version = "0.1"
+
+[dependencies.windows-core]
+version = "0.61"
 
 [dependencies.windows]
-git = "https://github.com/andfoy/windows-rs.git"
-rev = "07b80e517ee42c86283163ff78032b2ab77eb19e"
+version = "0.61"
 features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -47,12 +48,14 @@ features = [
 ]
 
 [build-dependencies.windows]
-git = "https://github.com/andfoy/windows-rs.git"
-rev = "07b80e517ee42c86283163ff78032b2ab77eb19e"
+version = "0.61"
 features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader"
 ]
+
+[build-dependencies.windows-bindgen]
+version = "0.62"
 
 [dev-dependencies]
 regex = "1.5"

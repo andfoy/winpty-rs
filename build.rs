@@ -10,6 +10,9 @@ use which::which;
 use windows::core::{HSTRING, PCSTR, PCWSTR, PSTR, PWSTR};
 #[cfg(windows)]
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+#[cfg(windows)]
+use windows_bindgen::bindgen;
+
 
 #[cfg(windows)]
 trait IntoPWSTR {
@@ -127,6 +130,20 @@ fn main() {
         let conpty_enabled;
 
         let current_path = env::current_dir().unwrap();
+
+        let args = [
+            "--in",
+            "default",
+            "lib/Windows.Wdk.winmd",
+            "--out",
+            "src/pty/conpty/win_bindings.rs",
+            "--filter",
+            "NtCreateNamedPipeFile",
+            "--reference",
+            "windows"
+        ];
+
+        _ = bindgen(args);
 
         // Check if ConPTY is enabled
         let reg_entry = "HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";

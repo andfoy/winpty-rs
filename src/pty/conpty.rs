@@ -10,6 +10,9 @@ mod calls;
 #[cfg(all(feature="conpty", feature="conpty_local"))]
 mod bindings;
 
+#[cfg(all(feature="conpty", feature="conpty_local"))]
+mod win_bindings;
+
 #[cfg(feature="conpty")]
 pub use pty_impl::ConPTY;
 
