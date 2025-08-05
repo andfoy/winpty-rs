@@ -269,6 +269,8 @@ fn main() {
                                 fs::copy(dll_path, dll_dst).unwrap();
                                 fs::copy(lib_orig, lib_dst).unwrap();
                                 binaries_found = true;
+
+                                fs::remove_dir_all(folder).unwrap();
                             }
                             Err(err) => panic!("{:?}", err),
                         }
