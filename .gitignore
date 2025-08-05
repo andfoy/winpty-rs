@@ -16,3 +16,4 @@ Cargo.lock
 *.lib
 
 Microsoft.Windows.Console.ConPTY*/
+src/pty/conpty/win_bindings.rs
