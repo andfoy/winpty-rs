@@ -1,3 +1,13 @@
+## Version 1.0.2 (2025/08/05)
+
+
+### Pull Requests Merged
+
+* [PR 98](https://github.com/andfoy/winpty-rs/pull/98) - Fix crate publishing, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
+
+
 ## Version 1.0.1 (2025/08/05)
 
 
