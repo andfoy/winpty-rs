@@ -1,3 +1,13 @@
+## Version 1.0.1 (2025/08/05)
+
+
+### Pull Requests Merged
+
+* [PR 97](https://github.com/andfoy/winpty-rs/pull/97) - Expose NtCreateNamedPipeFile directly in package, remove pin to windows-rs fork, by [@andfoy](https://github.com/andfoy)
+
+In this release 1 pull request was closed.
+
+
 ## Version 1.0.0 (2025/07/25)
 
 
