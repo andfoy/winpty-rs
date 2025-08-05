@@ -3,7 +3,7 @@ use windows::core::HRESULT;
 use windows::core::{Error, Owned, PCWSTR, PWSTR};
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::{
-    NtCreateFile, NtCreateNamedPipeFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
+    NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
     FILE_OPEN_IF, FILE_PIPE_BYTE_STREAM_MODE, FILE_PIPE_BYTE_STREAM_TYPE,
     FILE_PIPE_QUEUE_OPERATION, FILE_SYNCHRONOUS_IO_NONALERT,
 };
@@ -31,6 +31,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::System::WindowsProgramming::RtlInitUnicodeString;
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+use super::win_bindings::Windows::Wdk::Storage::FileSystem::NtCreateNamedPipeFile;
 // use windows_strings::PWSTR;
 
 use std::ffi::{c_void, OsString};
@@ -299,7 +300,7 @@ impl PTYImpl for ConPTY {
 
             // LARGE_INTEGER
 
-            status = NtCreateNamedPipeFile(
+            let alt_status = NtCreateNamedPipeFile(
                 &mut server_pipe,
                 server_desired_access.0.into(),
                 &gl_object_attributes,
@@ -318,8 +319,8 @@ impl PTYImpl for ConPTY {
 
             // status_block_gl_u.assume_init();
 
-            if status.is_err() {
-                let result = Error::from_hresult(status.into());
+            if alt_status.is_err() {
+                let result = Error::from_hresult(alt_status.into());
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
                 return Err(string);
