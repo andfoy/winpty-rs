@@ -462,9 +462,10 @@ impl PTYProcess {
                 let process_result = reader_process_rx.recv();
                 if let Ok(Some(process)) = process_result {
                     reader_ready.store(true, Ordering::Release);
-                    while reader_alive_rx
+                    let mut alive = reader_alive_rx
                         .try_recv()
-                        .unwrap_or(true)
+                        .unwrap_or(true);
+                    while alive
                     {
                         if !is_eof(process.into(), conout.into()).unwrap() {
                             match read(true, conout.into(), using_pipes, None) {
@@ -475,8 +476,12 @@ impl PTYProcess {
                                     reader_out_tx.send(Some(Err(err))).unwrap();
                                 }
                             }
+                            alive = reader_alive_rx
+                        .try_recv()
+                        .unwrap_or(true);
                         } else {
                             reader_out_tx.send(None).unwrap();
+                            alive = false;
                         }
                     }
                     spinlock_clone.store(false, Ordering::Release);
@@ -772,21 +777,18 @@ impl PTYProcess {
             )
             .is_ok();
 
-            let total_bytes = bytes.assume_init();
+            let _total_bytes = bytes.assume_init();
 
-            if succ {
-                let is_alive = match self.is_alive() {
-                    Ok(alive) => alive || !self.reader_out_rx.is_empty(),
-                    Err(err) => {
-                        return Err(err);
-                    }
-                };
-
-                if total_bytes == 0 && !is_alive {
-                    succ = false;
+            let is_alive = match self.is_alive() {
+                Ok(alive) => {
+                    alive || !self.reader_out_rx.is_empty()
+                },
+                Err(err) => {
+                    return Err(err);
                 }
-            }
+            };
 
+            succ = succ || is_alive || self.reader_atomic.load(Ordering::Acquire);
             Ok(!succ)
         }
     }
