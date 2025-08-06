@@ -173,16 +173,16 @@ fn main() {
         println!("Windows build number: {:?}", build_version);
 
         // let conpty_enabled;
-        let kernel32_res = unsafe { GetModuleHandleW(&HSTRING::from("kernel32.dll")) };
-        let kernel32 = kernel32_res.unwrap();
+        // let kernel32_res = unsafe { GetModuleHandleW(&HSTRING::from("kernel32.dll")) };
+        // let kernel32 = kernel32_res.unwrap();
 
-        let conpty = unsafe { GetProcAddress(kernel32, "CreatePseudoConsole".into_pcstr()) };
-        match conpty {
-            Some(_) => {
+        // let conpty = unsafe { GetProcAddress(kernel32, "CreatePseudoConsole".into_pcstr()) };
+        match major_version >= 10 && build_version >= 2004 {
+            true => {
                 conpty_enabled = "1";
                 println!("cargo:rustc-cfg=feature=\"conpty\"")
             }
-            None => {
+            false => {
                 conpty_enabled = "0";
             }
         }
