@@ -1,6 +1,6 @@
 [package]
 name = "winpty-rs"
-version = "1.0.3"
+version = "1.0.4-dev"
 edition = "2021"
 links = "winpty"
 license = "MIT OR Apache-2.0"
