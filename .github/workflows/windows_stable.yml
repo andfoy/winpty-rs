@@ -21,7 +21,7 @@ jobs:
                 RUST_TOOLCHAIN: ["stable", "nightly",]
         steps:
             - name: Checkout branch
-              uses: actions/checkout@v4
+              uses: actions/checkout@v5
             - name: Install latest Rust ${{ matrix.RUST_TOOLCHAIN }}
               uses: actions-rs/toolchain@v1
               with:
