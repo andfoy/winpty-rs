@@ -147,7 +147,7 @@ impl PTYImpl for ConPTY {
             result = if GetConsoleMode(h_console, console_mode_ref.as_mut().unwrap()).is_ok() {
                 S_OK
             } else {
-                Error::from_win32().into()
+                Error::from_thread().into()
             };
 
             if result.is_err() {
@@ -164,7 +164,7 @@ impl PTYImpl for ConPTY {
             {
                 S_OK
             } else {
-                Error::from_win32().into()
+                Error::from_thread().into()
             };
 
             if result.is_err() {
@@ -177,7 +177,7 @@ impl PTYImpl for ConPTY {
             result = if SetStdHandle(STD_OUTPUT_HANDLE, h_console).is_ok() {
                 S_OK
             } else {
-                Error::from_win32().into()
+                Error::from_thread().into()
             };
 
             if result.is_err() {
@@ -189,7 +189,7 @@ impl PTYImpl for ConPTY {
             result = if SetStdHandle(STD_ERROR_HANDLE, h_console).is_ok() {
                 S_OK
             } else {
-                Error::from_win32().into()
+                Error::from_thread().into()
             };
 
             if result.is_err() {
@@ -201,7 +201,7 @@ impl PTYImpl for ConPTY {
             result = if SetStdHandle(STD_INPUT_HANDLE, h_in).is_ok() {
                 S_OK
             } else {
-                Error::from_win32().into()
+                Error::from_thread().into()
             };
             if result.is_err() {
                 let result_msg = result.message();
@@ -362,7 +362,7 @@ impl PTYImpl for ConPTY {
             )
             .is_ok()
             {
-                result = Error::from_win32().into();
+                result = Error::from_thread().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
                 return Err(string);
@@ -379,21 +379,21 @@ impl PTYImpl for ConPTY {
             )
             .is_ok()
             {
-                result = Error::from_win32().into();
+                result = Error::from_thread().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
                 return Err(string);
             }
 
             // if !CreatePipe(&mut input_read_side, &mut input_write_side, None, 0).is_ok() {
-            //     result = Error::from_win32().into();
+            //     result = Error::from_thread().into();
             //     let result_msg = result.message();
             //     let string = OsString::from(result_msg);
             //     return Err(string);
             // }
 
             // if !CreatePipe(&mut output_read_side, &mut output_write_side, None, 0).is_ok() {
-            //     result = Error::from_win32().into();
+            //     result = Error::from_thread().into();
             //     let result_msg = result.message();
             //     let string = OsString::from(result_msg);
             //     return Err(string);
@@ -538,7 +538,7 @@ impl PTYImpl for ConPTY {
             )
             .is_ok()
             {
-                result = Error::from_win32().into();
+                result = Error::from_thread().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
                 return Err(string);
@@ -558,7 +558,7 @@ impl PTYImpl for ConPTY {
             )
             .is_ok()
             {
-                result = Error::from_win32().into();
+                result = Error::from_thread().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
                 return Err(string);
@@ -584,7 +584,7 @@ impl PTYImpl for ConPTY {
             .is_ok();
 
             if !succ {
-                result = Error::from_win32().into();
+                result = Error::from_thread().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
                 return Err(string);
