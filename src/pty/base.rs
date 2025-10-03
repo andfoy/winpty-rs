@@ -188,7 +188,7 @@ fn read(
                 result = if PeekNamedPipe(stream, None, 0, Some(bytes_ref), None, None).is_ok() {
                     S_OK
                 } else {
-                    Error::from_win32().into()
+                    Error::from_thread().into()
                 };
 
                 if result.is_err() {
@@ -205,7 +205,7 @@ fn read(
                 result = if GetFileSizeEx(stream, size_ref).is_ok() {
                     S_OK
                 } else {
-                    Error::from_win32().into()
+                    Error::from_thread().into()
                 };
 
                 if result.is_err() {
@@ -236,11 +236,11 @@ fn read(
         {
             S_OK
         } else {
-            let err = Error::from_win32();
+            let err = Error::from_thread();
             if let None = lp_overlapped {
-                Error::from_win32().into()
+                Error::from_thread().into()
             } else if err.code() != ERROR_IO_PENDING.into() {
-                Error::from_win32().into()
+                Error::from_thread().into()
             } else {
                 awaiting_io = true;
                 S_OK
@@ -259,7 +259,7 @@ fn read(
                 if (*overlapped).Internal == STATUS_PENDING.0 as usize {
                     if WaitForSingleObjectEx((*overlapped).hEvent, INFINITE, false) != WAIT_OBJECT_0
                     {
-                        Error::from_win32().into()
+                        Error::from_thread().into()
                     } else {
                         *chars_read_ptr = (*overlapped).InternalHigh as u32;
                         HRESULT((*overlapped).Internal as i32).into()
@@ -322,7 +322,7 @@ fn is_alive(process: HANDLE) -> Result<bool, OsString> {
             let alive = is_timeout == WAIT_TIMEOUT;
             Ok(alive)
         } else {
-            let err: HRESULT = Error::from_win32().into();
+            let err: HRESULT = Error::from_thread().into();
             let result_msg = err.message();
             let string = OsString::from(result_msg);
             Err(string)
@@ -338,7 +338,7 @@ fn wait_for_exit(process: HANDLE) -> Result<bool, OsString> {
             let dead = wait_status == WAIT_OBJECT_0;
             Ok(dead)
         } else {
-            let err: HRESULT = Error::from_win32().into();
+            let err: HRESULT = Error::from_thread().into();
             let result_msg = err.message();
             let string = OsString::from(result_msg);
             Err(string)
@@ -363,7 +363,7 @@ fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
             }
             Ok(exitstatus)
         } else {
-            let err: HRESULT = Error::from_win32().into();
+            let err: HRESULT = Error::from_thread().into();
             let result_msg = err.message();
             let string = OsString::from(result_msg);
             Err(string)
@@ -696,7 +696,7 @@ impl PTYProcess {
                         )
                         .is_err()
                         {
-                            let err: HRESULT = Error::from_win32().into();
+                            let err: HRESULT = Error::from_thread().into();
                             let result_msg = err.message();
                             let string = OsString::from(result_msg);
                             return Err(string);
@@ -715,12 +715,12 @@ impl PTYProcess {
                     {
                         S_OK
                     } else {
-                        let err = Error::from_win32();
+                        let err = Error::from_thread();
                         if err.code() == ERROR_IO_PENDING.into() {
                             *write_pending = true;
                             S_OK
                         } else {
-                            Error::from_win32().into()
+                            Error::from_thread().into()
                         }
                     };
 
@@ -740,7 +740,7 @@ impl PTYProcess {
                     {
                         S_OK
                     } else {
-                        Error::from_win32().into()
+                        Error::from_thread().into()
                     };
                     if write_result.is_err() {
                         let result_msg = write_result.message();
@@ -861,7 +861,7 @@ impl PTYProcess {
             if CancelIoEx(Into::<HANDLE>::into(self.conout), None).is_ok() {
                 Ok(true)
             } else {
-                let result: HRESULT = Error::from_win32().into();
+                let result: HRESULT = Error::from_thread().into();
                 let result_msg = result.message();
                 let string = OsString::from(result_msg);
                 Err(string)
