@@ -4,14 +4,58 @@ use std::env::consts::ARCH;
 use std::i64;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::fs::File;
 use std::str;
+use std::io::BufReader;
+use std::io::prelude::*;
+use std::io::SeekFrom::Start;
 use which::which;
 #[cfg(windows)]
-use windows::core::{HSTRING, PCSTR, PCWSTR, PSTR, PWSTR};
-#[cfg(windows)]
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::core::{PCSTR, PCWSTR, PSTR, PWSTR};
 #[cfg(windows)]
 use windows_bindgen::bindgen;
+
+use enum_primitive_derive::Primitive;
+use num_traits::{FromPrimitive, ToPrimitive};
+
+
+#[derive(Debug, Eq, PartialEq, Primitive)]
+enum PEMachineType {
+    UNKNOWN	= 0x0,
+    ALPHA	= 0x184,
+    ALPHA64	= 0x284,
+    AM33	= 0x1d3,
+    AMD64	= 0x8664,
+    ARM	= 0x1c0,
+    ARM64	= 0xaa64,
+    ARM64EC	= 0xA641,
+    ARM64X	= 0xA64E,
+    ARMNT	= 0x1c4,
+    EBC	= 0xebc,
+    I386	= 0x14c,
+    IA64	= 0x200,
+    LOONGARCH32	= 0x6232,
+    LOONGARCH64	= 0x6264,
+    M32R	= 0x9041,
+    MIPS16	= 0x266,
+    MIPSFPU	= 0x366,
+    MIPSFPU16	= 0x466,
+    POWERPC	= 0x1f0,
+    POWERPCFP	= 0x1f1,
+    R3000BE	= 0x160,
+    R3000	= 0x162,
+    R4000	= 0x166,
+    R10000	= 0x168,
+    RISCV32	= 0x5032,
+    RISCV64	= 0x5064,
+    RISCV128	= 0x5128,
+    SH3	= 0x1a2,
+    SH3DSP	= 0x1a3,
+    SH4	= 0x1a6,
+    SH5	= 0x1a8,
+    THUMB	= 0x1c2,
+    WCEMIPSV2	= 0x169,
+}
 
 
 #[cfg(windows)]
@@ -112,6 +156,42 @@ fn get_output_path() -> PathBuf {
     return PathBuf::from(path);
 }
 
+fn get_dll_target_arch(dll_path: PathBuf) -> PEMachineType {
+    let file = File::open(dll_path).unwrap();
+    let mut buf_reader = BufReader::new(file);
+    buf_reader.seek(Start(0x3C)).unwrap();
+
+    let mut off_buf: [u8; 4] = [0; 4];
+    buf_reader.read_exact(&mut off_buf).unwrap();
+
+    let pe_off = u32::from_ne_bytes(off_buf);
+    let displ = pe_off - 0x40;
+    buf_reader.seek_relative(displ.into()).unwrap();
+
+    let mut pe_buf: [u8; 6] = [0; 6];
+    buf_reader.read_exact(&mut pe_buf).unwrap();
+
+    assert_eq!(&pe_buf[0..2], b"PE", "File is not a Portable Executable");
+
+    let machine_type_bytes: [u8; 2] = pe_buf[4..6].try_into().unwrap();
+    let machine_type: u16 = u16::from_ne_bytes(machine_type_bytes);
+    println!("DLL compilation target: {:#X}", machine_type);
+
+    PEMachineType::from_u16(machine_type).unwrap()
+}
+
+fn check_dll_arch_validity(dll_path: PathBuf, cur_arch: &str) -> bool {
+    let target_arch = get_dll_target_arch(dll_path);
+
+    match target_arch {
+        PEMachineType::AMD64 => cur_arch == "x64",
+        PEMachineType::ARM64 => cur_arch == "arm64",
+        PEMachineType::ARM64EC => cur_arch == "x64",
+        PEMachineType::ARM64X => cur_arch == "x64" || cur_arch == "arm64",
+        _ => false
+    }
+}
+
 fn main() {
     if std::env::var("DOCS_RS").is_ok() {
         return;
@@ -121,6 +201,13 @@ fn main() {
         // println!("cargo:rerun-if-changed=src/lib.rs");
         // println!("cargo:rerun-if-changed=src/native.rs");
         // println!("cargo:rerun-if-changed=src/csrc");
+        let simplified_arch = match ARCH {
+            "x86_64" => "x64",
+            "arm" => "arm64",
+            "aarch64" => "arm64",
+            _ => ARCH,
+        };
+
         println!("cargo:rerun-if-changed=src/");
 
         // let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -239,13 +326,6 @@ fn main() {
                             Ok(folder) => {
                                 use std::fs;
 
-                                let simplified_arch = match ARCH {
-                                    "x86_64" => "x64",
-                                    "arm" => "arm64",
-                                    "aarch64" => "arm64",
-                                    _ => ARCH,
-                                };
-
                                 println!("{:?}", folder);
                                 println!("{:?}", get_output_path());
                                 let openconsole = folder
@@ -312,17 +392,26 @@ fn main() {
             // let winpty_include = winpty_root.join("include");
 
             let winpty_lib = winpty_root.join("lib");
+            let winpty_dll_path = winpty_path.join("winpty.dll");
 
-            println!(
-                "cargo:rustc-link-search=native={}",
-                winpty_lib.to_str().unwrap()
-            );
-            println!(
-                "cargo:rustc-link-search=native={}",
-                winpty_path.to_str().unwrap()
-            );
+            let valid_arch = check_dll_arch_validity(winpty_dll_path, simplified_arch);
 
-            println!("cargo:rustc-cfg=feature=\"winpty\"")
+            winpty_enabled = match valid_arch {
+                true => "1",
+                false => "0"
+            };
+
+            if valid_arch {
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    winpty_lib.to_str().unwrap()
+                );
+                println!(
+                    "cargo:rustc-link-search=native={}",
+                    winpty_path.to_str().unwrap()
+                );
+                println!("cargo:rustc-cfg=feature=\"winpty\"");
+            }
 
             // CFG.exported_header_dirs.push(&winpty_include);
         }

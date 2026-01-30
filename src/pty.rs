@@ -128,13 +128,16 @@ impl Default for PTYArgs {
 ///
 /// // Initialize a winpty and a conpty pseudoterminal.
 /// let mut conpty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+/// #[cfg(feature = "winpty")]
 /// let mut winpty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
 ///
 /// conpty.spawn(cmd.clone(), None, None, None).unwrap();
+/// #[cfg(feature = "winpty")]
 /// winpty.spawn(cmd.clone(), None, None, None).unwrap();
 ///
 /// let to_write = OsString::from("echo \"some str\"\r\n");
 /// let num_bytes1 = conpty.write(to_write.clone()).unwrap();
+/// #[cfg(feature = "winpty")]
 /// let num_bytes2 = winpty.write(to_write.clone()).unwrap();
 /// ```
 pub struct PTY {
