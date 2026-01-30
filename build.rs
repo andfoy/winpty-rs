@@ -162,14 +162,14 @@ fn get_dll_target_arch(dll_path: PathBuf) -> PEMachineType {
     buf_reader.seek(Start(0x3C)).unwrap();
 
     let mut off_buf: [u8; 4] = [0; 4];
-    buf_reader.read(&mut off_buf).unwrap();
+    buf_reader.read_exact(&mut off_buf).unwrap();
 
     let pe_off = u32::from_ne_bytes(off_buf);
     let displ = pe_off - 0x40;
     buf_reader.seek_relative(displ.into()).unwrap();
 
     let mut pe_buf: [u8; 6] = [0; 6];
-    buf_reader.read(&mut pe_buf).unwrap();
+    buf_reader.read_exact(&mut pe_buf).unwrap();
 
     assert_eq!(&pe_buf[0..2], b"PE", "File is not a Portable Executable");
 
