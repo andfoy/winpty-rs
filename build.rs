@@ -410,9 +410,9 @@ fn main() {
                     "cargo:rustc-link-search=native={}",
                     winpty_path.to_str().unwrap()
                 );
+                println!("cargo:rustc-cfg=feature=\"winpty\"");
             }
 
-            println!("cargo:rustc-cfg=feature=\"winpty\"");
             // CFG.exported_header_dirs.push(&winpty_include);
         }
 
