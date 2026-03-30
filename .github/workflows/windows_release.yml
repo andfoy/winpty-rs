@@ -26,7 +26,7 @@ jobs:
                 activate-environment: test
                 # channels: conda-forge,defaults
                 python-version: "3.9"
-            - uses: nuget/setup-nuget@v2
+            - uses: nuget/setup-nuget@v3
               with:
                 nuget-version: '5.x'
             - name: Conda env info
