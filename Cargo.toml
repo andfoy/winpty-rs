@@ -49,14 +49,14 @@ features = [
     "Win32_System_WindowsProgramming"
 ]
 
-[build-dependencies.windows]
+[target.'cfg(windows)'.build-dependencies.windows]
 version = "0.62"
 features = [
     "Win32_Foundation",
     "Win32_System_LibraryLoader"
 ]
 
-[build-dependencies.windows-bindgen]
+[target.'cfg(windows)'.build-dependencies.windows-bindgen]
 version = "0.64"
 
 [dev-dependencies]
