@@ -138,12 +138,14 @@ unsafe fn get_error_message(err_ptr: *mut winpty_error_ptr_t) -> OsString {
 
     }
     let msg_slice: &[u16] = from_raw_parts(err_msg, size);
-    if err_msg.is_null() {
-        OsString::from_wide(msg_slice)
-    } else {
-        winpty_error_free(*err_ptr);
+    let result = if err_msg.is_null() {
         OsString::from("Unknown error")
-    }
+    } else {
+        OsString::from_wide(msg_slice)
+    };
+    winpty_error_free(*err_ptr);
+
+    result
 }
 
 
