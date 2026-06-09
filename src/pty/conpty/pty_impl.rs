@@ -431,21 +431,25 @@ impl PTYImpl for ConPTY {
             let hpcon_clone = Arc::clone(&hpcon_mutex);
 
             let cleanup_thread = thread::spawn(move || {
-                let (_hthread_ptr, _hprocess_ptr, _startup_ptr, hpcon_ptr, console_allocated) =
-                    release_info_rx.recv().unwrap();
-                let clean = cleanup_rx.recv().unwrap();
-                if clean {
-                    let mut hpcon_guard = hpcon_clone.lock().unwrap();
-                    if hpcon_guard.1 {
-                        cleanup(
-                            // LocalHandle(hthread_ptr as *mut c_void),
-                            // LocalHandle(hprocess_ptr as *mut c_void),
-                            // LPPROC_THREAD_ATTRIBUTE_LIST(startup_ptr as *mut c_void),
-                            hpcon_guard.0.0,
-                            console_allocated,
-                        );
-                        *hpcon_guard = (hpcon_guard.0, false);
-                    }
+                match release_info_rx.recv() {
+                    Ok((_hthread_ptr, _hprocess_ptr, _startup_ptr, hpcon_ptr, console_allocated))=>{
+                        if let Ok(clean) = cleanup_rx.recv(){
+                            if clean {
+                                let mut hpcon_guard = hpcon_clone.lock().unwrap();
+                                if hpcon_guard.1 {
+                                    cleanup(
+                                        // LocalHandle(hthread_ptr as *mut c_void),
+                                        // LocalHandle(hprocess_ptr as *mut c_void),
+                                        // LPPROC_THREAD_ATTRIBUTE_LIST(startup_ptr as *mut c_void),
+                                        hpcon_guard.0.0,
+                                        console_allocated,
+                                    );
+                                    *hpcon_guard = (hpcon_guard.0, false);
+                                }
+                            }
+                        }
+                    },
+                    Err(_)=>{}
                 }
                 drop(cleanup_rx);
                 drop(release_info_rx);
