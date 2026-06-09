@@ -460,8 +460,8 @@ impl PTYProcess {
 
             let reader_thread = thread::spawn(move || {
                 let process_result = reader_process_rx.recv();
+                reader_ready.store(true, Ordering::Release);
                 if let Ok(Some(process)) = process_result {
-                    reader_ready.store(true, Ordering::Release);
                     let mut alive = reader_alive_rx
                         .try_recv()
                         .unwrap_or(true);
@@ -484,9 +484,8 @@ impl PTYProcess {
                             alive = false;
                         }
                     }
-                    spinlock_clone.store(false, Ordering::Release);
                 }
-
+                spinlock_clone.store(false, Ordering::Release);
                 drop(reader_process_rx);
                 drop(reader_alive_rx);
                 drop(reader_out_tx);
@@ -543,8 +542,8 @@ impl PTYProcess {
                 }
 
                 let process_result = reader_process_rx.recv();
+                reader_ready.store(true, Ordering::Release);
                 if let Ok(Some(process)) = process_result {
-                    reader_ready.store(true, Ordering::Release);
                     let _ = reader_process_2_tx.send(process);
                     let mut alive = true;
                     while alive {
@@ -563,9 +562,8 @@ impl PTYProcess {
                     unsafe {
                         let _ = CloseHandle(read_overlapped.hEvent);
                     }
-                    spinlock_clone.store(false, Ordering::Release);
                 }
-
+                spinlock_clone.store(false, Ordering::Release);
                 drop(reader_process_rx);
                 drop(reader_alive_rx);
                 drop(reader_out_tx);
