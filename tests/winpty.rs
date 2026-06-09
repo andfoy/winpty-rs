@@ -197,3 +197,46 @@ fn wait_for_exit() {
     assert!(!pty.is_alive().unwrap());
     assert_eq!(pty.get_exitstatus().unwrap(), Some(0))
 }
+
+#[test]
+fn drop_timing_winpty() {
+    use std::sync::mpsc::channel;
+    use std::thread;
+    use std::time::{ Duration, Instant };
+
+    let pty_args = PTYArgs {
+        cols: 80,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let pty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+    let (tx, rx) = channel::<Instant>();
+
+    thread::spawn(move || {
+        let start = Instant::now();
+        drop(pty);
+        let _ = tx.send(start);
+    });
+
+    let timeout = Duration::from_secs(2);
+    match rx.recv_timeout(timeout) {
+        Ok(start) => {
+            let elapsed = start.elapsed();
+            assert!(
+                elapsed.as_millis() < 1000,
+                "drop took {}ms, expected < 1000ms",
+                elapsed.as_millis()
+            );
+            println!("drop completed in {}ms", elapsed.as_millis());
+        }
+        Err(_) => {
+            panic!(
+                "drop timed out after {} seconds, possible infinite loop detected",
+                timeout.as_secs()
+            );
+        }
+    }
+}
