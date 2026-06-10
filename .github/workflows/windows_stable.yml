@@ -26,8 +26,25 @@ jobs:
             - uses: nuget/setup-nuget@v3
               with:
                 nuget-version: '5.x'
-            - name: Install grcov
+
+            # Cache cargo registry/git index and target/ between runs. Keyed on
+            # Cargo.lock plus toolchain, so coverage-instrumented nightly builds
+            # don't collide with stable ones.
+            - name: Cache cargo + target
+              uses: Swatinem/rust-cache@v2
+              with:
+                key: ${{ matrix.RUST_TOOLCHAIN }}
+
+            # Cache grcov so we don't reinstall it on every nightly run.
+            - name: Cache grcov
               if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' }}
+              id: cache-grcov
+              uses: actions/cache@v4
+              with:
+                path: ~/.cargo/bin/grcov.exe
+                key: ${{ runner.os }}-grcov-v1
+            - name: Install grcov
+              if: ${{ matrix.RUST_TOOLCHAIN == 'nightly' && steps.cache-grcov.outputs.cache-hit != 'true' }}
               shell: bash -l {0}
               run: cargo install grcov
             - name: Add llvm-tools-preview component
@@ -39,11 +56,20 @@ jobs:
             - name: Install miniconda
               uses: conda-incubator/setup-miniconda@v3
               with:
-                auto-update-conda: true
+                auto-update-conda: false
                 miniforge-version: latest
                 activate-environment: test
                 # channels: conda-forge,defaults
                 python-version: '3.10'
+                use-mamba: true
+            # Cache the conda env directory so `conda install winpty` and the
+            # python env setup don't re-run on every job. Key on the env spec
+            # so it busts when we change Python/winpty versions.
+            - name: Cache conda env
+              uses: actions/cache@v4
+              with:
+                path: ~/miniconda3/envs/test
+                key: ${{ runner.os }}-conda-test-python3.10-winpty-v1
             - name: Conda env info
               shell: bash -l {0}
               run: conda env list
