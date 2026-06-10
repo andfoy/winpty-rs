@@ -57,7 +57,7 @@ features = [
 ]
 
 [target.'cfg(windows)'.build-dependencies.windows-bindgen]
-version = "0.64"
+version = "0.66"
 
 [dev-dependencies]
 regex = "1.5"

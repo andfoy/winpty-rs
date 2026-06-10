@@ -227,7 +227,15 @@ fn main() {
             "--filter",
             "NtCreateNamedPipeFile",
             "--reference",
-            "windows"
+            "windows",
+            // windows-bindgen 0.66 auto-inserts hardcoded references to
+            // `windows_core::NTSTATUS` (and similar) at lib.rs:415, targeting an
+            // unreleased future windows-rs layout. The latest published
+            // windows-core (0.62.x) has no NTSTATUS, so the generated bindings
+            // fail to compile. `--no-deps` skips those auto-inserts so our
+            // `--reference windows` resolves NTSTATUS to
+            // `windows::Win32::Foundation::NTSTATUS`.
+            "--no-deps",
         ];
 
         _ = bindgen(args);
