@@ -1,3 +1,21 @@
+## Version 1.0.6 (2026/06/10)
+
+
+### Pull Requests Merged
+
+* [PR 123](https://github.com/andfoy/winpty-rs/pull/123) - CI: cache cargo, grcov, and conda env, by [@andfoy](https://github.com/andfoy)
+* [PR 122](https://github.com/andfoy/winpty-rs/pull/122) - Bump windows-bindgen to 0.66 with --no-deps to keep NTSTATUS resolution, by [@andfoy](https://github.com/andfoy)
+* [PR 120](https://github.com/andfoy/winpty-rs/pull/120) - Use event-driven teardown for PTYProcess reader thread, by [@andfoy](https://github.com/andfoy)
+* [PR 119](https://github.com/andfoy/winpty-rs/pull/119) - Test: Add drop duration tests; Fix drop infinite loop and cleanup_thread panic, by [@XY0797](https://github.com/XY0797)
+* [PR 118](https://github.com/andfoy/winpty-rs/pull/118) - Bump codecov/codecov-action from 5 to 7, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 115](https://github.com/andfoy/winpty-rs/pull/115) - Bump conda-incubator/setup-miniconda from 3 to 4, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 114](https://github.com/andfoy/winpty-rs/pull/114) - Bump nuget/setup-nuget from 3 to 4, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 113](https://github.com/andfoy/winpty-rs/pull/113) - Fix logical error in get_error_message function, by [@chmxy1213](https://github.com/chmxy1213)
+* [PR 111](https://github.com/andfoy/winpty-rs/pull/111) - Fix building for a windows target on a non-Windows system, by [@chmxy1213](https://github.com/chmxy1213)
+
+In this release 9 pull requests were closed.
+
+
 ## Version 1.0.2 (2025/08/05)
 
 
