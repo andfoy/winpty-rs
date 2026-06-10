@@ -20,6 +20,10 @@ jobs:
             - uses: nuget/setup-nuget@v4
               with:
                 nuget-version: '5.x'
+            - name: Cache cargo + target
+              uses: Swatinem/rust-cache@v2
+              with:
+                key: arm
             - name: Cargo build
               shell: bash -l {0}
               run: cargo build -vv --features conpty
