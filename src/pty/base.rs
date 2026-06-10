@@ -10,7 +10,8 @@ use windows::Win32::Globalization::{
 use windows::Win32::Storage::FileSystem::{GetFileSizeEx, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::PeekNamedPipe;
 use windows::Win32::System::Threading::{
-    CreateEventExW, WaitForSingleObjectEx, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS, INFINITE,
+    CreateEventExW, SetEvent, WaitForSingleObjectEx, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS,
+    INFINITE,
 };
 use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessId, WaitForSingleObject};
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
@@ -23,7 +24,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
@@ -219,8 +219,7 @@ fn read(
     }
 
     const BUFFER_SIZE: usize = 32768;
-    let os_str = "\0".repeat(BUFFER_SIZE);
-    let mut buf_vec: Vec<u8> = os_str.as_str().as_bytes().to_vec();
+    let mut buf_vec: Vec<u8> = vec![0u8; BUFFER_SIZE];
     let mut chars_read = MaybeUninit::<u32>::uninit();
     let mut awaiting_io = false;
     unsafe {
@@ -289,7 +288,7 @@ fn read(
     //     return Ok((OsString::new(), awaiting_io));
     // }
 
-    let mut vec_buf: Vec<u16> = std::iter::repeat(0).take(buf_vec.len()).collect();
+    let mut vec_buf: Vec<u16> = vec![0u16; buf_vec.len()];
 
     unsafe {
         MultiByteToWideChar(
@@ -414,6 +413,9 @@ pub struct PTYProcess {
     reader_alive: Sender<bool>,
     /// Atomic variable to signal when a thread finishes
     reader_atomic: Arc<AtomicBool>,
+    /// Manual-reset event signaled by the reader thread on exit; lets teardown wait
+    /// event-driven instead of busy-looping on `reader_atomic`.
+    reader_exit_event: LocalHandle,
     /// Channel used to send the process handle to the reading thread.
     reader_process_out: Sender<Option<LocalHandle>>,
     /// Atomic flag to signal that the reading process has the process handle.
@@ -448,6 +450,17 @@ impl PTYProcess {
     ) -> PTYProcess {
         let thread_arc = Arc::new(AtomicBool::new(true));
         let reader_arc = Arc::new(AtomicBool::new(false));
+
+        // Manual-reset event signaled by the reader thread when it exits. Teardown
+        // waits on this (event-driven) instead of busy-polling `thread_arc`.
+        let reader_exit_handle = unsafe {
+            match CreateEventExW(None, None, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS.0) {
+                Ok(evt) => evt,
+                Err(_) => HANDLE::default(),
+            }
+        };
+        let reader_exit_event = LocalHandle::from(reader_exit_handle);
+
         if !async_ {
             // Keep only the reading thread channel
             let (reader_out_tx, reader_out_rx) =
@@ -457,6 +470,7 @@ impl PTYProcess {
             let (reader_process_tx, reader_process_rx) = unbounded::<Option<LocalHandle>>();
             let spinlock_clone = Arc::clone(&thread_arc);
             let reader_ready = Arc::clone(&reader_arc);
+            let reader_exit_for_thread = reader_exit_event;
 
             let reader_thread = thread::spawn(move || {
                 let process_result = reader_process_rx.recv();
@@ -486,6 +500,11 @@ impl PTYProcess {
                     }
                 }
                 spinlock_clone.store(false, Ordering::Release);
+
+                unsafe {
+                    let _ = SetEvent(Into::<HANDLE>::into(reader_exit_for_thread));
+                }
+
                 drop(reader_process_rx);
                 drop(reader_alive_rx);
                 drop(reader_out_tx);
@@ -501,6 +520,7 @@ impl PTYProcess {
                 alive_thread: None,
                 reader_alive: reader_alive_tx,
                 reader_atomic: thread_arc,
+                reader_exit_event,
                 reader_process_out: reader_process_tx,
                 reader_ready: reader_arc,
                 reader_out_rx,
@@ -527,6 +547,8 @@ impl PTYProcess {
             let spinlock_clone = Arc::clone(&thread_arc);
             let reader_ready = Arc::clone(&reader_arc);
             let (reader_process_2_tx, reader_process_2_rx) = unbounded::<LocalHandle>();
+            let reader_exit_for_thread = reader_exit_event;
+            let reader_exit_for_alive = reader_exit_event;
 
             let reader_thread = thread::spawn(move || {
                 let mut read_overlapped = OVERLAPPED::default();
@@ -564,26 +586,42 @@ impl PTYProcess {
                     }
                 }
                 spinlock_clone.store(false, Ordering::Release);
+
+                unsafe {
+                    let _ = SetEvent(Into::<HANDLE>::into(reader_exit_for_thread));
+                }
+
                 drop(reader_process_rx);
                 drop(reader_alive_rx);
                 drop(reader_out_tx);
                 drop(reader_process_2_tx);
             });
 
-            let alive_reader_atomic = Arc::clone(&thread_arc);
             let alive_thread = thread::spawn(move || {
                 if let Ok(handle) = reader_process_2_rx.recv() {
                     let _ = wait_for_exit(handle.into());
                     unsafe {
-                        while alive_reader_atomic.load(Ordering::Acquire) {
+                        // Child has exited. Let modern ConPTY auto-close the output
+                        // pipe — reader's pending ReadFile then returns 0 bytes
+                        // (natural EOF) and the reader exits, signaling
+                        // `reader_exit_event`. If that doesn't happen in time
+                        // (older ConPTY / non-ConPTY consumer), fall back to
+                        // CancelIoEx to unstick the reader.
+                        let exit_handle = Into::<HANDLE>::into(reader_exit_for_alive);
+                        if WaitForSingleObject(exit_handle, 5000) != WAIT_OBJECT_0 {
                             let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
-                        }
-                        match cleanup_tx {
-                            None => (),
-                            Some(tx) => {
-                                // alive_tx.send(false);
-                                let _ = tx.send(true).unwrap_or(());
+                            loop {
+                                if WaitForSingleObject(exit_handle, 50) == WAIT_OBJECT_0 {
+                                    break;
+                                }
+                                let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
                             }
+                        }
+                        // Reader has drained and exited. Signal cleanup so the
+                        // consumer (e.g. ConPTY's cleanup_thread) can release
+                        // resources via ClosePseudoConsole.
+                        if let Some(tx) = cleanup_tx {
+                            let _ = tx.send(true).unwrap_or(());
                         }
                     }
                 }
@@ -600,6 +638,7 @@ impl PTYProcess {
                 alive_thread: Some(alive_thread),
                 reader_alive: reader_alive_tx,
                 reader_atomic: thread_arc,
+                reader_exit_event,
                 reader_process_out: reader_process_tx,
                 reader_ready: reader_arc,
                 reader_out_rx,
@@ -876,12 +915,23 @@ impl Drop for PTYProcess {
                 if self.reader_process_out.send(None).is_ok() {}
             }
 
-            while self.reader_atomic.load(Ordering::Acquire) {
-                // Cancel all pending IO operations on conout
-                let _ = CancelIoEx(Into::<HANDLE>::into(self.conout), None);
+            // Signal the sync reader (which polls the channel) that it should exit,
+            // and cancel any pending I/O so a blocked ReadFile returns. Then wait
+            // event-driven for the reader to actually exit. Retry on timeout to
+            // handle the race where the reader issues a new read between cancel
+            // and wait.
+            let _ = self.reader_alive.send(false);
+            let _ = CancelIoEx(Into::<HANDLE>::into(self.conout), None);
 
-                // Send instruction to thread to finish
-                if self.reader_alive.send(false).is_ok() {}
+            let exit_handle = Into::<HANDLE>::into(self.reader_exit_event);
+            if !self.reader_exit_event.is_invalid() {
+                loop {
+                    if WaitForSingleObject(exit_handle, 50) == WAIT_OBJECT_0 {
+                        break;
+                    }
+                    let _ = self.reader_alive.send(false);
+                    let _ = CancelIoEx(Into::<HANDLE>::into(self.conout), None);
+                }
             }
 
             // Wait for the thread to be down
@@ -903,6 +953,10 @@ impl Drop for PTYProcess {
 
             if let Some(thread_handle) = self.alive_thread.take() {
                 thread_handle.join().unwrap_or(());
+            }
+
+            if !self.reader_exit_event.is_invalid() {
+                let _ = CloseHandle(exit_handle);
             }
         }
     }
