@@ -38,9 +38,8 @@ use std::ffi::{c_void, OsString};
 use std::mem::MaybeUninit;
 use std::ops::DerefMut;
 use std::os::windows::ffi::OsStrExt;
-use std::sync::{mpsc, Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
-use std::{mem, ptr, thread};
+use std::sync::{Arc, Mutex};
+use std::{mem, ptr};
 
 use super::calls::{ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, ShowHidePseudoConsole};
 use crate::pty::PTYArgs;
@@ -54,24 +53,6 @@ pub struct ConPTY {
     startup_info: STARTUPINFOEXW,
     process: PTYProcess,
     console_allocated: bool,
-    release_info_tx: mpsc::Sender<(isize, isize, isize, isize, bool)>,
-    cleanup_thread: JoinHandle<()>,
-    cleanup_tx: mpsc::Sender<bool>
-}
-
-fn cleanup(
-    // startup_info: LPPROC_THREAD_ATTRIBUTE_LIST,
-    handle: isize,
-    console_allocated: bool,
-) {
-    unsafe {
-        // DeleteProcThreadAttributeList(startup_info);
-        let _ = ClosePseudoConsole(HPCON(handle));
-
-        if console_allocated {
-            let _ = FreeConsole();
-        }
-    }
 }
 
 unsafe impl Send for ConPTY {}
@@ -414,46 +395,14 @@ impl PTYImpl for ConPTY {
             // let _ = CloseHandle(input_read_side);
             // let _ = CloseHandle(output_write_side);
 
-            // let cleanup_callback = Arc::new((Mutex::<Option<Box<dyn Fn() + Send + 'static>>>::new(None), Condvar::new()));
-            let (cleanup_tx, cleanup_rx) = mpsc::channel::<bool>();
-            let (release_info_tx, release_info_rx) =
-                mpsc::channel::<(isize, isize, isize, isize, bool)>();
-
             let pty_process = PTYProcess::new(
                 server_pipe.into(),
                 server_pipe.into(),
                 true,
                 true,
-                Some(cleanup_tx.clone()),
             );
 
             let hpcon_mutex = Arc::new(Mutex::new((pty_handle, true)));
-            let hpcon_clone = Arc::clone(&hpcon_mutex);
-
-            let cleanup_thread = thread::spawn(move || {
-                match release_info_rx.recv() {
-                    Ok((_hthread_ptr, _hprocess_ptr, _startup_ptr, hpcon_ptr, console_allocated))=>{
-                        if let Ok(clean) = cleanup_rx.recv(){
-                            if clean {
-                                let mut hpcon_guard = hpcon_clone.lock().unwrap();
-                                if hpcon_guard.1 {
-                                    cleanup(
-                                        // LocalHandle(hthread_ptr as *mut c_void),
-                                        // LocalHandle(hprocess_ptr as *mut c_void),
-                                        // LPPROC_THREAD_ATTRIBUTE_LIST(startup_ptr as *mut c_void),
-                                        hpcon_guard.0.0,
-                                        console_allocated,
-                                    );
-                                    *hpcon_guard = (hpcon_guard.0, false);
-                                }
-                            }
-                        }
-                    },
-                    Err(_)=>{}
-                }
-                drop(cleanup_rx);
-                drop(release_info_rx);
-            });
 
             Ok(Box::new(ConPTY {
                 handle: hpcon_mutex,
@@ -461,9 +410,6 @@ impl PTYImpl for ConPTY {
                 startup_info: STARTUPINFOEXW::default(),
                 process: pty_process,
                 console_allocated,
-                release_info_tx,
-                cleanup_thread,
-                cleanup_tx
             }) as Box<dyn PTYImpl>)
         }
     }
@@ -587,6 +533,12 @@ impl PTYImpl for ConPTY {
             )
             .is_ok();
 
+            // The proc-thread attribute list is only needed during process
+            // creation. Free it now rather than carrying it to Drop. Matches
+            // Microsoft Terminal's lifetime handling.
+            DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
+            self.startup_info.lpAttributeList = LPPROC_THREAD_ATTRIBUTE_LIST(std::ptr::null_mut());
+
             if !succ {
                 result = Error::from_thread().into();
                 let result_msg = result.message();
@@ -595,15 +547,6 @@ impl PTYImpl for ConPTY {
             }
 
             self.process.set_process(self.process_info.hProcess, false);
-            self.release_info_tx
-                .send((
-                    self.process_info.hProcess.0 as isize,
-                    self.process_info.hThread.0 as isize,
-                    self.startup_info.lpAttributeList.0 as isize,
-                    handle.0.0,
-                    self.console_allocated,
-                ))
-                .unwrap();
             Ok(true)
         }
     }
@@ -674,8 +617,6 @@ impl PTYImpl for ConPTY {
 impl Drop for ConPTY {
     fn drop(&mut self) {
         unsafe {
-            self.cleanup_tx.send(false).unwrap_or(());
-
             if !self.process_info.hThread.is_invalid() {
                 let _ = CloseHandle(self.process_info.hThread);
             }
@@ -684,7 +625,12 @@ impl Drop for ConPTY {
                 let _ = CloseHandle(self.process_info.hProcess);
             }
 
-            DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
+            // If `spawn` was never called the attribute list is still allocated
+            // here; otherwise it was freed at the end of spawn and the pointer
+            // is null.
+            if !self.startup_info.lpAttributeList.is_invalid() {
+                DeleteProcThreadAttributeList(self.startup_info.lpAttributeList);
+            }
             let mut guard =  self.handle.lock().unwrap();
             if guard.1 {
                 let _ = ClosePseudoConsole(guard.0);

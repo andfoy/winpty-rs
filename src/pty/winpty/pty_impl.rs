@@ -223,7 +223,7 @@ impl PTYImpl for WinPTY {
             let conin = conin_res.unwrap();
             let conout = conout_res.unwrap();
 
-            let process = PTYProcess::new(conin.into(), conout.into(), false, false, None);
+            let process = PTYProcess::new(conin.into(), conout.into(), false, false);
             Ok(Box::new(WinPTY { ptr: pty_ptr, process }) as Box<dyn PTYImpl>)
         }
     }
