@@ -16,7 +16,7 @@ jobs:
             CI: "1"
         steps:
             - name: Checkout branch
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
             - uses: nuget/setup-nuget@v4
               with:
                 nuget-version: '5.x'
