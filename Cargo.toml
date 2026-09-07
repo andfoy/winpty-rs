@@ -29,7 +29,7 @@ version = "0.5"
 version = "0.2"
 
 [dependencies.windows-core]
-version = "0.62"
+version = "0.100"
 
 [dependencies.windows]
 version = "0.62"
