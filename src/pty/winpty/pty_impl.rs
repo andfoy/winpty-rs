@@ -255,7 +255,28 @@ impl PTYImpl for WinPTY {
         }
 
         if let Some(cmdline_opt) = cmdline {
-            cmd_buf = cmdline_opt.encode_wide().collect();
+            // `cmdline` means "arguments only", as it does for the ConPTY
+            // backend, which builds `appname + " " + cmdline` itself.
+            //
+            // winpty hands this value to `CreateProcessW` as `lpCommandLine`
+            // while also passing `appname` as `lpApplicationName`. Win32 still
+            // takes the child's `argv[0]` from `lpCommandLine` in that case -
+            // per the `CreateProcessW` docs, "because argv[0] is the module
+            // name, C programmers generally repeat the module name as the
+            // first token in the command line". Passing the arguments alone
+            // therefore made the child consume the *first argument* as its
+            // `argv[0]`, silently losing it (see #132).
+            //
+            // Prepend `appname` so both backends agree on what `cmdline`
+            // means. pywinpty already assumes the ConPTY meaning - it passes
+            // `list2cmdline(argv[1:])` - so this makes that work on WinPTY
+            // rather than changing what callers must supply.
+            let mut full_cmdline = OsString::new();
+            full_cmdline.clone_from(&appname);
+            full_cmdline.push(" ");
+            full_cmdline.push(&cmdline_opt);
+
+            cmd_buf = full_cmdline.encode_wide().collect();
             cmd_buf.push(0);
             cmd = cmd_buf.as_ptr();
         }

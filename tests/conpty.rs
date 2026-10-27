@@ -331,3 +331,80 @@ fn drop_timing_conpty() {
         }
     }
 }
+
+/// Locate `python.exe` on PATH, returning its full path.
+///
+/// The WinPTY backend passes `appname` as `CreateProcessW`'s
+/// `lpApplicationName`, and Windows does not search PATH for that argument,
+/// so a bare "python.exe" would not resolve. Tests that need a real argv
+/// probe therefore have to resolve it themselves.
+fn find_python() -> Option<std::path::PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join("python.exe"))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+/// `cmdline` carries arguments only; `appname` supplies `argv[0]`.
+///
+/// Regression test for #132. ConPTY has always behaved correctly here; this pins the behaviour so the
+/// two backends cannot drift apart again.
+///
+/// `python` is used deliberately rather than `cmd.exe`: cmd.exe scans its raw
+/// command line for switches and so still honours a leading `/c` even when
+/// `argv[0]` has been eaten, which masks the bug entirely. Python uses
+/// C-runtime argv semantics, so if the first argument is consumed as
+/// `argv[0]` it tries to open the `-c` code string as a *file* and fails with
+/// "can't open file".
+#[test]
+fn spawn_cmdline_is_arguments_only_conpty() {
+    use std::time::Instant;
+
+    const MARKER: &str = "WINPTYRS_ARGV_OK";
+
+    let Some(python) = find_python() else {
+        eprintln!("python.exe not found on PATH; skipping");
+        return;
+    };
+
+    let pty_args = PTYArgs {
+        cols: 120,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+    pty.spawn(
+        python.into_os_string(),
+        Some(OsString::from(r#"-c "print('WINPTYRS_ARGV_OK')""#)),
+        None,
+        None,
+    )
+    .unwrap();
+    let _ = pty.write(OsString::from("[?1;0c[0;0R"));
+
+    // Bounded: never spin waiting for output that may never arrive.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut collected = String::new();
+    while Instant::now() < deadline
+        && !collected.contains(MARKER)
+        && !collected.contains("can't open file")
+    {
+        if let Ok(out) = pty.read(false) {
+            collected.push_str(&out.to_string_lossy());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    assert!(
+        !collected.contains("can't open file"),
+        "the first argument was consumed as argv[0], so python received the          -c code string as a filename. `cmdline` must mean arguments only,          with `appname` supplying argv[0]. Got: {collected:?}"
+    );
+    assert!(
+        collected.contains(MARKER),
+        "python did not run the -c code. Got: {collected:?}"
+    );
+}
