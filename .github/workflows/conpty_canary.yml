@@ -1,0 +1,97 @@
+name: ConPTY canary
+
+# Builds and tests against whatever ConPTY NuGet currently serves, rather
+# than the version pinned in build.rs.
+#
+# Why this exists: build.rs pins `Microsoft.Windows.Console.ConPTY` so that
+# builds are reproducible and an upstream release cannot silently break
+# every build of the crate. The risk of pinning is the opposite failure -
+# drifting far behind without noticing. This job closes that gap by failing
+# loudly when a newer ConPTY breaks us, so the next pin bump is a deliberate,
+# informed change.
+#
+# Dependabot cannot cover this: it only understands NuGet through project
+# manifests (.csproj, packages.config, Directory.Packages.props, ...), not a
+# version string inside a Rust build script.
+#
+# This job is expected to go red occasionally. That is the signal, not a
+# defect - treat a failure as "Microsoft changed ConPTY, investigate before
+# bumping the pin".
+
+on:
+    schedule:
+        # Mondays, 05:00 UTC.
+        - cron: '0 5 * * 1'
+    workflow_dispatch:
+        inputs:
+            conpty_version:
+                description: 'ConPTY NuGet version to test (or "latest")'
+                required: false
+                default: 'latest'
+
+jobs:
+    canary:
+        name: ConPTY ${{ github.event.inputs.conpty_version || 'latest' }} / Rust ${{ matrix.RUST_TOOLCHAIN }}
+        runs-on: windows-latest
+        # A ConPTY behaviour change previously manifested as a teardown
+        # deadlock, not a test failure, and ran until the job was cancelled.
+        # Fail fast instead.
+        timeout-minutes: 20
+        env:
+            RUST_TOOLCHAIN: ${{ matrix.RUST_TOOLCHAIN }}
+            RUNNER_OS: "windows"
+            CI: "1"
+            WINPTY_RS_CONPTY_VERSION: ${{ github.event.inputs.conpty_version || 'latest' }}
+        strategy:
+            fail-fast: false
+            matrix:
+                RUST_TOOLCHAIN: ["stable"]
+        steps:
+            - name: Checkout branch
+              uses: actions/checkout@v6
+
+            - uses: nuget/setup-nuget@v4
+              with:
+                nuget-version: '5.x'
+
+            - name: Install miniconda
+              uses: conda-incubator/setup-miniconda@v4
+              with:
+                auto-update-conda: true
+                miniforge-version: latest
+                channels: conda-forge
+                conda-remove-defaults: "true"
+                python-version: "3.12"
+
+            - name: Install winpty
+              shell: bash -l {0}
+              run: conda install -y winpty
+
+            - name: Report resolved ConPTY version
+              shell: bash -l {0}
+              run: |
+                echo "Requested: $WINPTY_RS_CONPTY_VERSION"
+                cargo build -vv --features conpty --features winpty 2>&1 | grep -i "ConPTY version:" || true
+
+            # The whole suite, doc-tests included. The ConPTY 1.25 deadlock
+            # reproduced *only* in the doc-tests - every unit and integration
+            # test passed individually - so a canary that skipped them would
+            # have missed it entirely.
+            - name: Cargo test (all targets, incl. doc-tests)
+              shell: bash -l {0}
+              run: cargo test --features conpty --features winpty -- --test-threads=1
+
+            - name: Report any orphaned child processes
+              if: ${{ always() }}
+              shell: pwsh
+              run: |
+                $procs = Get-CimInstance Win32_Process -Filter "Name='cmd.exe' OR Name='OpenConsole.exe' OR Name='winpty-agent.exe'"
+                if ($procs) {
+                  Write-Host "Child processes still alive after the suite:"
+                  foreach ($p in $procs) {
+                    $alive = $null -ne (Get-Process -Id $p.ParentProcessId -ErrorAction SilentlyContinue)
+                    Write-Host ("  pid={0,-7} {1,-18} parentAlive={2}" -f $p.ProcessId, $p.Name, $alive)
+                  }
+                } else {
+                  Write-Host "No leftover child processes."
+                }

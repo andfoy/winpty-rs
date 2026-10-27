@@ -146,6 +146,56 @@ fn command_output(cmd: &mut Command) -> String {
         .to_string()
 }
 
+/// Version of the `Microsoft.Windows.Console.ConPTY` NuGet package to build
+/// against.
+///
+/// This is pinned deliberately. It used to be unpinned, which meant every
+/// build took whatever Microsoft had most recently published, so an upstream
+/// release could break every build of this crate with no signal until
+/// someone's tests hung - and the published crate carries no record of which
+/// ConPTY it was validated against, so already-released versions changed
+/// behaviour underneath their users too.
+///
+/// That is not hypothetical: 1.24.260512001 -> 1.25.260930003 changed when a
+/// ConPTY client is released, which deadlocked teardown (see
+/// `wait_for_exit_bounded` in `src/pty/base.rs`).
+///
+/// Bumping this is a deliberate change: run the full suite, including the
+/// doc-tests, under `scripts/run-ci-local.ps1` before raising it.
+///
+/// Override with the `WINPTY_RS_CONPTY_VERSION` environment variable. Set it
+/// to `latest` to resolve whatever NuGet currently serves - that is what the
+/// scheduled canary workflow does, so an upstream ConPTY change shows up as a
+/// failing canary rather than as a mystery hang weeks later. Dependabot
+/// cannot do this for us: it only understands NuGet through project
+/// manifests, not a version string in a Rust build script.
+const CONPTY_NUGET_VERSION: &str = "1.25.260930003";
+
+/// Environment variable that overrides [`CONPTY_NUGET_VERSION`].
+const CONPTY_VERSION_ENV: &str = "WINPTY_RS_CONPTY_VERSION";
+
+/// Resolve the ConPTY NuGet version to build against.
+///
+/// Returns `None` when the caller asked for `latest`, meaning no `-Version`
+/// argument should be passed and NuGet picks the newest release.
+fn conpty_nuget_version() -> Option<String> {
+    println!("cargo:rerun-if-env-changed={CONPTY_VERSION_ENV}");
+    match env::var(CONPTY_VERSION_ENV) {
+        Ok(v) if v.eq_ignore_ascii_case("latest") => {
+            println!("ConPTY version: latest (unpinned, requested via {CONPTY_VERSION_ENV})");
+            None
+        }
+        Ok(v) if !v.trim().is_empty() => {
+            println!("ConPTY version: {v} (from {CONPTY_VERSION_ENV})");
+            Some(v)
+        }
+        _ => {
+            println!("ConPTY version: {CONPTY_NUGET_VERSION} (pinned)");
+            Some(CONPTY_NUGET_VERSION.to_owned())
+        }
+    }
+}
+
 fn get_output_path() -> PathBuf {
     //<root or manifest path>/target/<profile>/
     let manifest_dir_string = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -314,12 +364,18 @@ fn main() {
                     panic!("NuGet is required to build winpty-rs");
                 }
 
-                if command_ok(
-                     Command::new("nuget.exe")
-                        .current_dir(current_path.to_str().unwrap())
-                        .arg("install")
-                        .arg("Microsoft.Windows.Console.ConPTY"),
-                ) {
+                let mut nuget_install = Command::new("nuget.exe");
+                nuget_install
+                    .current_dir(current_path.to_str().unwrap())
+                    .arg("install")
+                    .arg("Microsoft.Windows.Console.ConPTY");
+                // Omitted entirely for `latest`, so NuGet resolves the
+                // newest release (the canary workflow's case).
+                if let Some(version) = conpty_nuget_version() {
+                    nuget_install.arg("-Version").arg(version);
+                }
+
+                if command_ok(&mut nuget_install) {
                     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
                     let manifest_path = PathBuf::from(Path::new(&manifest_dir));
                     for path in glob(

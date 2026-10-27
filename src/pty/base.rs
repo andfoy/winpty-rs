@@ -24,6 +24,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
+
+/// How long teardown will wait for the reader thread to signal that it has
+/// exited before giving up and continuing anyway.
+///
+/// The reader signals only once its pending `ReadFile` returns, and that
+/// relies on ConPTY closing the output pipe when the child exits. That is an
+/// assumption about an external component whose behaviour we do not control -
+/// a ConPTY update that changes it must not be able to deadlock us.
+const READER_EXIT_BUDGET: Duration = Duration::from_millis(2_000);
+
+/// Poll granularity while waiting for `reader_exit_event`.
+const READER_EXIT_POLL_MS: u32 = 50;
+
 
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
@@ -599,6 +613,11 @@ impl PTYProcess {
 
             let alive_thread = thread::spawn(move || {
                 if let Ok(handle) = reader_process_2_rx.recv() {
+                    // Unbounded on purpose. This thread lives for the whole
+                    // lifetime of the PTY, not just teardown, so a timeout
+                    // here would fire during normal operation and tear down a
+                    // perfectly healthy session. Teardown is instead made
+                    // safe by `Drop` not joining this thread - see there.
                     let _ = wait_for_exit(handle.into());
                     unsafe {
                         // Child has exited. Let modern ConPTY auto-close the output
@@ -610,8 +629,23 @@ impl PTYProcess {
                         let exit_handle = Into::<HANDLE>::into(reader_exit_for_alive);
                         if WaitForSingleObject(exit_handle, 5000) != WAIT_OBJECT_0 {
                             let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
+                            // Bounded. This used to spin forever if the
+                            // reader never signalled, which wedges this
+                            // thread and, worse, withholds the cleanup
+                            // signal below so the pseudoconsole is never
+                            // released.
+                            let deadline = Instant::now() + READER_EXIT_BUDGET;
                             loop {
-                                if WaitForSingleObject(exit_handle, 50) == WAIT_OBJECT_0 {
+                                if WaitForSingleObject(exit_handle, READER_EXIT_POLL_MS)
+                                    == WAIT_OBJECT_0
+                                {
+                                    break;
+                                }
+                                if Instant::now() >= deadline {
+                                    // Give up. The reader cannot be unstuck
+                                    // from here, and falling through at least
+                                    // releases the pseudoconsole rather than
+                                    // leaking it along with this thread.
                                     break;
                                 }
                                 let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
@@ -923,10 +957,24 @@ impl Drop for PTYProcess {
             let _ = self.reader_alive.send(false);
             let _ = CancelIoEx(Into::<HANDLE>::into(self.conout), None);
 
+            // Bounded wait for the reader to acknowledge it has exited.
+            //
+            // This was an unbounded `loop`, which deadlocks `drop` outright
+            // whenever the reader never signals. A wedged reader thread is
+            // survivable - process teardown reaps it - but a wedged `drop`
+            // is not: it hangs whoever dropped the PTY. Through pywinpty that
+            // means hanging Jupyter, so this must always make progress.
             let exit_handle = Into::<HANDLE>::into(self.reader_exit_event);
+            let mut reader_exited = true;
             if !self.reader_exit_event.is_invalid() {
+                reader_exited = false;
+                let deadline = Instant::now() + READER_EXIT_BUDGET;
                 loop {
-                    if WaitForSingleObject(exit_handle, 50) == WAIT_OBJECT_0 {
+                    if WaitForSingleObject(exit_handle, READER_EXIT_POLL_MS) == WAIT_OBJECT_0 {
+                        reader_exited = true;
+                        break;
+                    }
+                    if Instant::now() >= deadline {
                         break;
                     }
                     let _ = self.reader_alive.send(false);
@@ -934,9 +982,15 @@ impl Drop for PTYProcess {
                 }
             }
 
-            // Wait for the thread to be down
+            // Only join a reader we know has finished. Joining one still
+            // blocked in `ReadFile` would reintroduce exactly the deadlock
+            // bounded above. The result is deliberately discarded rather than
+            // unwrapped: panicking inside `drop` risks a double panic and an
+            // abort.
             if let Some(thread_handle) = self.reading_thread.take() {
-                thread_handle.join().unwrap();
+                if reader_exited {
+                    let _ = thread_handle.join();
+                }
             }
 
             if !self.conin.is_invalid() {
@@ -951,9 +1005,20 @@ impl Drop for PTYProcess {
                 let _ = CloseHandle(Into::<HANDLE>::into(self.process));
             }
 
-            if let Some(thread_handle) = self.alive_thread.take() {
-                thread_handle.join().unwrap_or(());
-            }
+            // Detach `alive_thread` rather than joining it.
+            //
+            // It blocks in `wait_for_exit(child)` for the PTY's whole
+            // lifetime, so joining here deadlocks whenever the child outlives
+            // `ClosePseudoConsole` - which ConPTY 1.25 no longer guarantees
+            // as promptly as 1.24 did. That is what hung teardown, orphaned
+            // the child process and wedged the doc-tests in CI.
+            //
+            // Detaching is sound: `ConPTY::drop` has already called
+            // `ClosePseudoConsole` by the time we get here (the outer drop
+            // body runs before its fields are dropped), so releasing the
+            // pseudoconsole does not depend on this thread. Dropping the
+            // `JoinHandle` detaches it and process teardown reaps it.
+            drop(self.alive_thread.take());
 
             if !self.reader_exit_event.is_invalid() {
                 let _ = CloseHandle(exit_handle);

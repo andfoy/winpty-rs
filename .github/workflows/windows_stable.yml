@@ -11,6 +11,9 @@ jobs:
     windows:
         name: Rust ${{ matrix.RUST_TOOLCHAIN }}
         runs-on: windows-latest
+        # A ConPTY behaviour change can wedge teardown rather than fail a
+        # test, which previously ran to GitHub's 360-minute default. Fail fast.
+        timeout-minutes: 25
         env:
             RUST_TOOLCHAIN: ${{ matrix.RUST_TOOLCHAIN }}
             RUNNER_OS: "windows"

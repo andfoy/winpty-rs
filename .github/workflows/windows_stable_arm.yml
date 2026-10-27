@@ -11,6 +11,9 @@ jobs:
     windows:
         name: Rust ARM
         runs-on: windows-11-arm
+        # A ConPTY behaviour change can wedge teardown rather than fail a
+        # test, which previously ran to GitHub's 360-minute default. Fail fast.
+        timeout-minutes: 25
         env:
             RUNNER_OS: "windows"
             CI: "1"
