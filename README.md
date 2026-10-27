@@ -117,3 +117,5 @@ Visit our [CHANGELOG](CHANGELOG.md) file to learn more about our new features an
 
 ## Contribution guidelines
 We use `cargo clippy` to lint this project and `cargo test` to test its functionality. Feel free to send a PR or create an issue if you have any problem/question.
+
+<!-- CI control: no-op change to trigger a pristine-main CI run. -->
