@@ -25,7 +25,12 @@ jobs:
                 miniforge-version: latest
                 activate-environment: test
                 # channels: conda-forge,defaults
-                python-version: "3.9"
+                # Only used to create a conda env from which to pull
+                # winpty; nothing here runs Python. 3.9 has been EOL
+                # since 2025-10, so it is pinned forward to keep the
+                # release job from depending on conda-forge continuing
+                # to serve an unsupported interpreter.
+                python-version: "3.12"
             - uses: nuget/setup-nuget@v4
               with:
                 nuget-version: '5.x'
