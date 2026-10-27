@@ -1,3 +1,49 @@
+## Version 1.0.7 (2026/10/27)
+
+This release fixes a teardown deadlock that affects **every build made
+against ConPTY 1.25.260930003 or newer**, which NuGet has served since
+2026-09-30. Because `build.rs` previously resolved the ConPTY package
+unpinned, this affects builds of already-published 1.0.6 as well - upgrading
+is recommended for all users.
+
+### Issues Closed
+
+* [Issue 133](https://github.com/andfoy/winpty-rs/issues/133) - Async write returns with the last chunk pending over dropped memory, and its count omits completed chunks ([PR 134](https://github.com/andfoy/winpty-rs/pull/134) by [@andfoy](https://github.com/andfoy))
+* [Issue 132](https://github.com/andfoy/winpty-rs/issues/132) - cmdline meaning differs between conpty and winpty impls? ([PR 139](https://github.com/andfoy/winpty-rs/pull/139) by [@andfoy](https://github.com/andfoy))
+
+In this release 2 issues were closed.
+
+### Pull Requests Merged
+
+* [PR 140](https://github.com/andfoy/winpty-rs/pull/140) - Reference the ngrok token from secrets instead of inlining it, by [@andfoy](https://github.com/andfoy)
+* [PR 139](https://github.com/andfoy/winpty-rs/pull/139) - Make cmdline mean the same thing on both backends, by [@andfoy](https://github.com/andfoy) ([132](https://github.com/andfoy/winpty-rs/issues/132))
+* [PR 138](https://github.com/andfoy/winpty-rs/pull/138) - Fix all clippy warnings (90 -> 0), by [@andfoy](https://github.com/andfoy)
+* [PR 137](https://github.com/andfoy/winpty-rs/pull/137) - Set STARTF_USESTDHANDLES; drop the SetStdHandle hijack, by [@andfoy](https://github.com/andfoy)
+* [PR 136](https://github.com/andfoy/winpty-rs/pull/136) - Fix teardown deadlock with ConPTY 1.25; pin the NuGet version, by [@andfoy](https://github.com/andfoy)
+* [PR 134](https://github.com/andfoy/winpty-rs/pull/134) - Fix async write byte-count and OVERLAPPED lifetime bugs, by [@andfoy](https://github.com/andfoy) ([133](https://github.com/andfoy/winpty-rs/issues/133))
+* [PR 127](https://github.com/andfoy/winpty-rs/pull/127) - Bump actions/cache from 4 to 6, by [@dependabot[bot]](https://github.com/apps/dependabot)
+* [PR 126](https://github.com/andfoy/winpty-rs/pull/126) - Bump actions/checkout from 6 to 7, by [@dependabot[bot]](https://github.com/apps/dependabot)
+
+In this release 8 pull requests were closed.
+
+### Notes for packagers
+
+* The `Microsoft.Windows.Console.ConPTY` NuGet package is now **pinned** in
+  `build.rs` (1.25.260930003) rather than resolved to whatever is newest.
+  Override with the `WINPTY_RS_CONPTY_VERSION` environment variable; `latest`
+  resolves the newest release. A weekly `ConPTY canary` workflow builds
+  against `latest` so an upstream change surfaces as a failing canary rather
+  than a mystery hang.
+* `PTYProcess::write`'s `cmdline` argument now means the same thing on both
+  backends: arguments only, with `appname` supplying `argv[0]`. The WinPTY
+  backend previously consumed the caller's first argument as `argv[0]` and
+  lost it. Callers already following the ConPTY convention - including
+  pywinpty - need no change.
+* Children are still not terminated when a PTY is dropped if they outlive
+  `ClosePseudoConsole`; this no longer blocks teardown, but it can leave a
+  stray child process. Tracked separately.
+
+
 ## Version 1.0.6 (2026/06/10)
 
 
