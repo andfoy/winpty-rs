@@ -1,5 +1,5 @@
 #![allow(non_camel_case_types)]
-/// WinPTY C bindings.
+//! WinPTY C bindings.
 
 /*
  * Copyright (c) 2011-2016 Ryan Prichard

@@ -57,6 +57,9 @@ pub unsafe fn ResizePseudoConsole(hPC: HPCON, size: COORD) -> Result<()> {
 }
 
 #[cfg(all(feature = "conpty", feature = "conpty_local"))]
+// Safe wrapper kept alongside the rest of the ConPTY surface; no caller
+// in this crate uses it yet.
+#[allow(dead_code)]
 pub unsafe fn ClearPseudoConsole(hPC: HPCON) -> Result<()> {
     let result_code = ConptyClearPseudoConsole(hPC.0 as *mut c_void);
 

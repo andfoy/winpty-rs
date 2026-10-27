@@ -230,7 +230,7 @@ impl PTY {
 	/// * `cmdline` - Optional space-delimited arguments to provide to the executable.
 	/// * `cwd` - Optional path from where the executable should be spawned.
 	/// * `env` - Optional environment variables to provide to the process. Each
-	/// variable should be declared as `VAR=VALUE` and be separated by a NUL (0) character.
+	///   variable should be declared as `VAR=VALUE` and be separated by a NUL (0) character.
 	///
 	/// # Returns
 	/// `true` if the call was successful, else an error will be returned.

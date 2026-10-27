@@ -1,4 +1,4 @@
-/// Actual WinPTY backend implementation.
+//! Actual WinPTY backend implementation.
 
 use windows::Win32::Foundation::HANDLE;
 use windows::core::PCWSTR;
@@ -199,7 +199,7 @@ impl PTYImpl for WinPTY {
 
             let empty_handle = HANDLE(ptr::null_mut());
             let conin_res = CreateFileW(
-                PCWSTR(conin_name as *const u16), FILE_GENERIC_WRITE.0, FILE_SHARE_NONE, None,
+                PCWSTR(conin_name), FILE_GENERIC_WRITE.0, FILE_SHARE_NONE, None,
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, Some(empty_handle)
             );
 
