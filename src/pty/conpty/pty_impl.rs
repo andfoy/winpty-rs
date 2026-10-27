@@ -26,7 +26,7 @@ use windows::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess,
     InitializeProcThreadAttributeList, UpdateProcThreadAttribute, CREATE_UNICODE_ENVIRONMENT,
     EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-    STARTUPINFOEXW, STARTUPINFOW,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
 };
 use windows::Win32::System::WindowsProgramming::RtlInitUnicodeString;
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
@@ -173,41 +173,11 @@ impl PTYImpl for ConPTY {
                 return Err(string);
             }
 
-            // Set new streams
-            result = if SetStdHandle(STD_OUTPUT_HANDLE, h_console).is_ok() {
-                S_OK
-            } else {
-                Error::from_thread().into()
-            };
-
-            if result.is_err() {
-                let result_msg = result.message();
-                let string = OsString::from(result_msg);
-                return Err(string);
-            }
-
-            result = if SetStdHandle(STD_ERROR_HANDLE, h_console).is_ok() {
-                S_OK
-            } else {
-                Error::from_thread().into()
-            };
-
-            if result.is_err() {
-                let result_msg = result.message();
-                let string = OsString::from(result_msg);
-                return Err(string);
-            }
-
-            result = if SetStdHandle(STD_INPUT_HANDLE, h_in).is_ok() {
-                S_OK
-            } else {
-                Error::from_thread().into()
-            };
-            if result.is_err() {
-                let result_msg = result.message();
-                let string = OsString::from(result_msg);
-                return Err(string);
-            }
+            // NOTE (experiment): the `SetStdHandle` hijack that used to live
+            // here is gone. It only existed to compensate for the missing
+            // `STARTF_USESTDHANDLES` above - see the comment on `start_info`.
+            // Microsoft Terminal never calls `SetStdHandle` (repo-wide search
+            // finds zero call sites).
 
             // Create communication channels
             // - Close these after CreateProcess of child application with pseudoconsole object.
@@ -525,9 +495,27 @@ impl PTYImpl for ConPTY {
                 LPPROC_THREAD_ATTRIBUTE_LIST(lp_attribute_list.as_mut_ptr().cast::<_>());
 
             // Prepare Startup Information structure
+            //
+            // `STARTF_USESTDHANDLES` with all three `hStd*` left NULL is what
+            // Microsoft Terminal does (`ConptyConnection::_LaunchAttachedClient`,
+            // src/cascadia/TerminalConnection/ConptyConnection.cpp).
+            //
+            // It matters: with `dwFlags == 0`, `CreateProcessW` copies the
+            // *parent's* std handle values into the child's
+            // `RTL_USER_PROCESS_PARAMETERS` - and it does that regardless of
+            // `bInheritHandles`, which is why passing `false` does not prevent
+            // it. The child then writes to whatever the parent's stdout was
+            // instead of to the pseudoconsole.
+            //
+            // With the flag set and the handles NULL, the child's process
+            // parameters carry NULL std handles, so its console initialization
+            // creates fresh ConIn/ConOut against the pseudoconsole it was
+            // attached to via `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`. That is
+            // what makes the `SetStdHandle` hijack below unnecessary.
             let start_info = STARTUPINFOEXW {
                 StartupInfo: STARTUPINFOW {
                     cb: mem::size_of::<STARTUPINFOEXW>() as u32,
+                    dwFlags: STARTF_USESTDHANDLES,
                     ..Default::default()
                 },
                 lpAttributeList: proc_thread_list,
