@@ -438,10 +438,104 @@ pub struct PTYProcess {
     reader_out_rx: Receiver<Option<Result<OsString, OsString>>>,
     /// PTY process is async
     async_: bool,
-    /// Writing OVERLAPPED struct for async operation
-    write_overlapped: Option<OVERLAPPED>,
-    /// Write mutex for concurrent access under async IO
-    write_mutex: Arc<Mutex<bool>>,
+    /// Serialised write state used by the async ConPTY path. The `OVERLAPPED`
+    /// struct, its event, and the owned source buffer all live inside the
+    /// mutex so their addresses stay stable for the kernel's duration — the
+    /// previous code passed `.unwrap()`ed stack copies of the OVERLAPPED to
+    /// `WriteFile`/`GetOverlappedResult` and leaked the chunk slice back to
+    /// the caller before the kernel finished with it (#133).
+    write_mutex: Mutex<WriteState>,
+}
+
+/// Writer state owned by `PTYProcess` when the ConPTY async path is active.
+///
+/// The three fields are kept together so that holding `write_mutex` grants
+/// exclusive access to the OVERLAPPED struct, its backing event, and the
+/// source buffer currently being handed to the kernel. Each has a stable
+/// address for the lifetime of the mutex guard, which is what makes
+/// overlapped I/O sound here.
+struct WriteState {
+    /// `true` while a previously-submitted `WriteFile` is still in flight.
+    /// Normally cleared before `write()` returns; the first thing a new call
+    /// does is drain any carry-over left behind by an interrupted prior
+    /// call (defensive).
+    pending: bool,
+    /// OVERLAPPED struct re-used across writes. Its `hEvent` is a
+    /// manual-reset event created once on construction and freed in
+    /// `Drop for PTYProcess`.
+    overlapped: OVERLAPPED,
+    /// Owns the UTF-8-encoded bytes currently handed to `WriteFile`. Kept
+    /// alive through the pending window so the kernel never reads freed
+    /// memory.
+    buffer: Vec<u8>,
+}
+
+// `OVERLAPPED.hEvent` is a raw `HANDLE` (a pointer). The default auto-impl
+// of Send/Sync for a Mutex<WriteState> would otherwise block cross-thread
+// access to the lock. All kernel-visible writes to this field happen through
+// Win32 overlapped I/O which is safe to issue from any thread as long as the
+// handle isn't aliased, and the mutex guarantees that.
+unsafe impl Send for WriteState {}
+
+/// How long a single overlapped write may stay pending before we give up,
+/// cancel it and report an error.
+///
+/// This must be bounded. The ConPTY input pipe can remain backed up for an
+/// unbounded time when nothing is draining it - most visibly when a caller
+/// writes immediately after `spawn` and the child has not started reading
+/// its stdin yet. An unbounded wait there deadlocks the caller permanently
+/// (it hung the `src/pty.rs:115` doc-test in CI, which does exactly that).
+const WRITE_COMPLETION_TIMEOUT_MS: u32 = 10_000;
+
+/// Collect the result of a pending overlapped operation without waiting
+/// forever.
+///
+/// Waits up to `timeout_ms` on the operation's event. If it completes, the
+/// transferred byte count is returned. On timeout the I/O is cancelled with
+/// `CancelIoEx` and we then wait (briefly, and unconditionally) for the
+/// cancellation to land, because the caller's source buffer may not be
+/// released or reused until the kernel has genuinely finished with it.
+///
+/// # Safety
+/// `overlapped` must point at the exact OVERLAPPED struct previously handed
+/// to the pending `ReadFile`/`WriteFile` on `handle`, and must stay valid
+/// for the duration of this call.
+unsafe fn drain_overlapped(
+    handle: HANDLE,
+    overlapped: *mut OVERLAPPED,
+    timeout_ms: u32,
+) -> Result<u32, OsString> {
+    let event = (*overlapped).hEvent;
+    let mut transferred: u32 = 0;
+
+    // With a non-null hEvent the kernel resets the event on submission and
+    // signals it on completion, so waiting on it is well-defined here.
+    let waited = if event.is_invalid() {
+        // No event to wait on; fall back to polling the status field.
+        WAIT_OBJECT_0
+    } else {
+        WaitForSingleObject(event, timeout_ms)
+    };
+
+    if waited == WAIT_OBJECT_0 {
+        if GetOverlappedResult(handle, overlapped, &mut transferred as *mut u32, false).is_ok() {
+            return Ok(transferred);
+        }
+        let err: HRESULT = Error::from_thread().into();
+        return Err(OsString::from(err.message()));
+    }
+
+    // Timed out (or the wait itself failed). Cancel so the kernel stops
+    // touching the source buffer, then reap the cancellation. The second
+    // wait uses `true` because by this point the operation is either
+    // complete or cancelled, so it cannot block indefinitely.
+    let _ = CancelIoEx(handle, Some(overlapped));
+    let _ = GetOverlappedResult(handle, overlapped, &mut transferred as *mut u32, true);
+
+    Err(OsString::from(format!(
+        "Timed out after {timeout_ms}ms waiting for a pending PTY write to complete; \
+         the operation was cancelled after {transferred} byte(s) were transferred"
+    )))
 }
 
 impl PTYProcess {
@@ -539,8 +633,11 @@ impl PTYProcess {
                 reader_ready: reader_arc,
                 reader_out_rx,
                 async_,
-                write_overlapped: None,
-                write_mutex: Arc::new(Mutex::new(false)),
+                write_mutex: Mutex::new(WriteState {
+                    pending: false,
+                    overlapped: OVERLAPPED::default(),
+                    buffer: Vec::new(),
+                }),
             }
         } else {
             let mut write_overlapped = OVERLAPPED::default();
@@ -677,8 +774,11 @@ impl PTYProcess {
                 reader_ready: reader_arc,
                 reader_out_rx,
                 async_,
-                write_overlapped: Some(write_overlapped),
-                write_mutex: Arc::new(Mutex::new(false)),
+                write_mutex: Mutex::new(WriteState {
+                    pending: false,
+                    overlapped: write_overlapped,
+                    buffer: Vec::new(),
+                }),
             }
         }
     }
@@ -720,10 +820,12 @@ impl PTYProcess {
     /// The total number of characters written if the call was successful, else
     /// an [`OsString`] containing an human-readable error.
     pub fn write(&self, buf: OsString) -> Result<u32, OsString> {
-        const BUFFER_SIZE: usize = 8192;
         let vec_buf: Vec<u16> = buf.encode_wide().collect();
 
         unsafe {
+            // Convert the UTF-16 input to UTF-8. `WideCharToMultiByte` called
+            // with `cbMultiByte = 0`/`lpMultiByteStr = null` reports the exact
+            // byte count required (no trailing NUL since `vec_buf` has none).
             let required_size = WideCharToMultiByte(
                 CP_UTF8,
                 0,
@@ -733,10 +835,11 @@ impl PTYProcess {
                 None,
             );
 
-            let mut bytes_buf: Vec<u8> = std::iter::repeat(0)
-                .take((required_size) as usize)
-                .collect();
+            if required_size == 0 {
+                return Ok(0);
+            }
 
+            let mut bytes_buf: Vec<u8> = vec![0u8; required_size as usize];
             WideCharToMultiByte(
                 CP_UTF8,
                 0,
@@ -746,61 +849,25 @@ impl PTYProcess {
                 None,
             );
 
-            let mut total_written = 0u32;
-            let mut bytes_written = MaybeUninit::<u32>::uninit();
-            let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes_written.as_mut_ptr());
-            let bytes_ref = Some(bytes_ptr);
+            // Sync path (WinPTY and any other non-ConPTY backend, which
+            // construct `PTYProcess` with `async_ = false`).
+            //
+            // Kept byte-for-byte as it was: chunked at 8 KiB, one blocking
+            // `WriteFile` per chunk, accumulating the per-chunk counts.
+            // #133 is exclusively about the async/ConPTY path, and a
+            // synchronous `WriteFile` has no cancellation escape - it blocks
+            // until the reader (winpty-agent) drains - so the chunking is
+            // load-bearing rather than cosmetic: it bounds each write
+            // against the pipe buffer instead of betting the whole payload
+            // fits.
+            if !self.async_ {
+                const BUFFER_SIZE: usize = 8192;
+                let mut total_written = 0u32;
+                let mut bytes_written = MaybeUninit::<u32>::uninit();
+                let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes_written.as_mut_ptr());
+                let bytes_ref = Some(bytes_ptr);
 
-            let c_mutex = Arc::clone(&self.write_mutex);
-            let mut write_pending = c_mutex.lock().unwrap();
-
-            // Write in chunks
-            for chunk in bytes_buf.chunks(BUFFER_SIZE) {
-                if self.async_ {
-                    if *write_pending {
-                        *write_pending = false;
-                        if GetOverlappedResult(
-                            Into::<HANDLE>::into(self.conin),
-                            &mut self.write_overlapped.unwrap(),
-                            bytes_ptr,
-                            true,
-                        )
-                        .is_err()
-                        {
-                            let err: HRESULT = Error::from_thread().into();
-                            let result_msg = err.message();
-                            let string = OsString::from(result_msg);
-                            return Err(string);
-                        } else {
-                            total_written += bytes_written.assume_init();
-                        }
-                    }
-
-                    let write_result = if WriteFile(
-                        Into::<HANDLE>::into(self.conin),
-                        Some(chunk),
-                        bytes_ref,
-                        Some(&mut self.write_overlapped.unwrap()),
-                    )
-                    .is_ok()
-                    {
-                        S_OK
-                    } else {
-                        let err = Error::from_thread();
-                        if err.code() == ERROR_IO_PENDING.into() {
-                            *write_pending = true;
-                            S_OK
-                        } else {
-                            Error::from_thread().into()
-                        }
-                    };
-
-                    if write_result.is_err() {
-                        let result_msg = write_result.message();
-                        let string = OsString::from(result_msg);
-                        return Err(string);
-                    }
-                } else {
+                for chunk in bytes_buf.chunks(BUFFER_SIZE) {
                     let write_result = if WriteFile(
                         Into::<HANDLE>::into(self.conin),
                         Some(chunk),
@@ -820,8 +887,102 @@ impl PTYProcess {
                     }
                     total_written += bytes_written.assume_init();
                 }
+                return Ok(total_written);
             }
-            Ok(total_written)
+
+            // Async path (ConPTY). Shape mirrors Microsoft Terminal's
+            // `ConptyConnection::WriteInput`: hold the writer lock for the
+            // whole call, drain any carry-over pending write at the top (not
+            // the bottom - see #133 defect 2), then issue one overlapped
+            // `WriteFile` against the stable `state.overlapped` address with
+            // the source bytes owned by `state.buffer` (not a stack slice
+            // that drops on return - see #133 defect 1/2). Fixes:
+            //   #133 defect 1: OVERLAPPED was passed as `&mut
+            //     self.write_overlapped.unwrap()`, a stack-local copy; the
+            //     kernel scribbled on freed memory on pend.
+            //   #133 defect 2: a chunk's source slice pointed into a local
+            //     Vec; the function returned with the write still pending
+            //     and the Vec dropped, so the kernel read freed memory.
+            //   #133 defect 3: sync-complete chunks never incremented
+            //     `total_written`; small writes returned 0.
+            let mut state = self.write_mutex.lock().map_err(|_| {
+                OsString::from("writer mutex poisoned")
+            })?;
+
+            // Drain any leftover pending write first. Under normal flow
+            // this branch does nothing (the previous call drained before
+            // returning); it only runs if a prior call unwound before its
+            // drain, in which case we must collect that completion before
+            // reusing `state.overlapped`.
+            if state.pending {
+                // Bounded: never wait forever for a carry-over.
+                let _ = drain_overlapped(
+                    Into::<HANDLE>::into(self.conin),
+                    &mut state.overlapped,
+                    WRITE_COMPLETION_TIMEOUT_MS,
+                );
+                state.pending = false;
+                // `state.buffer` can now be reused; either the kernel
+                // finished with it or `drain_overlapped` cancelled the
+                // operation and waited for the cancellation to land.
+            }
+
+            // Move the new payload into the member buffer so its address is
+            // stable through the pending window. Terminal does the same with
+            // its `_writeBuffer` member.
+            state.buffer.clear();
+            state.buffer.extend_from_slice(&bytes_buf);
+
+            // Issue the write against the member OVERLAPPED/buffer. One call,
+            // no chunking - ConPTY's input pipe accepts arbitrary sizes and
+            // Terminal does not chunk either.
+            let mut bytes_written: u32 = 0;
+            let buf_ptr = state.buffer.as_ptr();
+            let buf_len = state.buffer.len();
+            // Build a slice tied to the member buffer's lifetime so WriteFile
+            // sees the stable address. Using `state.buffer.as_slice()`
+            // directly would re-borrow `state` while `state.overlapped` is
+            // also borrowed below; splitting the raw pieces sidesteps that.
+            let buf_slice = std::slice::from_raw_parts(buf_ptr, buf_len);
+            let overlapped_ptr: *mut OVERLAPPED = &mut state.overlapped;
+
+            let write_ok = WriteFile(
+                Into::<HANDLE>::into(self.conin),
+                Some(buf_slice),
+                Some(&mut bytes_written as *mut u32),
+                Some(overlapped_ptr),
+            );
+
+            match write_ok {
+                Ok(_) => {
+                    // Sync completion. The kernel has already read the
+                    // buffer; nothing is pending.
+                    Ok(bytes_written)
+                }
+                Err(err) if err.code() == ERROR_IO_PENDING.into() => {
+                    // Overlapped submission accepted but not yet complete.
+                    // We must not return while the kernel still owns
+                    // `state.buffer`, and we must not wait forever: the
+                    // ConPTY input pipe can stay backed up indefinitely if
+                    // nothing is draining it (e.g. a freshly-spawned child
+                    // that has not started reading stdin). An unbounded
+                    // `GetOverlappedResult(.., true)` here deadlocks the
+                    // caller - it hung the doc-test at src/pty.rs:115 in CI,
+                    // which writes immediately after spawn with no reader.
+                    state.pending = true;
+                    let drained = drain_overlapped(
+                        Into::<HANDLE>::into(self.conin),
+                        &mut state.overlapped,
+                        WRITE_COMPLETION_TIMEOUT_MS,
+                    );
+                    state.pending = false;
+                    match drained {
+                        Ok(n) => Ok(n),
+                        Err(msg) => Err(msg),
+                    }
+                }
+                Err(err) => Err(OsString::from(err.message())),
+            }
         }
     }
 
@@ -1022,6 +1183,20 @@ impl Drop for PTYProcess {
 
             if !self.reader_exit_event.is_invalid() {
                 let _ = CloseHandle(exit_handle);
+            }
+
+            // Close the writer's OVERLAPPED event. Previously this was never
+            // freed (leaked once per PTY on the async path).
+            //
+            // Deliberately *not* taking `write_mutex` here: `drop` receives
+            // `&mut self`, so we already have exclusive access, and taking a
+            // lock during teardown risks wedging it behind an in-flight
+            // write. `get_mut` asserts that statically instead.
+            if let Ok(state) = self.write_mutex.get_mut() {
+                let write_event = state.overlapped.hEvent;
+                if !write_event.is_invalid() {
+                    let _ = CloseHandle(write_event);
+                }
             }
         }
     }
