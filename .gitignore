@@ -17,3 +17,6 @@ Cargo.lock
 
 Microsoft.Windows.Console.ConPTY*/
 src/pty/conpty/win_bindings.rs
+
+# Claude Code local settings
+.claude/
