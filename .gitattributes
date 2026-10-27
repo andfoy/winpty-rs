@@ -1,0 +1,7 @@
+# `build.rs` regenerates src/pty/conpty/win_bindings.rs with windows-bindgen,
+# which always writes LF. Pin this file to LF so a checkout with
+# core.autocrlf=true does not leave CRLF on disk for build.rs to "modify" -
+# `cargo publish` fails verification when a build script changes anything
+# under src/ ("Source directory was modified by build.rs"), and it also makes
+# the file show up as spuriously dirty in git status after every build.
+src/pty/conpty/win_bindings.rs text eol=lf
