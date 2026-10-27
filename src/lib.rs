@@ -172,4 +172,90 @@ mod tests {
         println!("Empty reads: {}", empty_reads);
         println!("Average bytes per successful read: {}", if read_count > 0 { total_bytes / read_count } else { 0 });
     }
+
+    /// Reproducer for issue #133 (defect 3): on the async ConPTY path, a
+    /// chunk that completes synchronously is never added to `total_written`,
+    /// so a small write that fits in one 8192-byte chunk returns 0 regardless
+    /// of payload size.
+    ///
+    /// Expected: pty.write returns the UTF-8 byte count of the payload.
+    /// Actual (current code): returns 0.
+    #[test]
+    fn test_write_returns_byte_count_small_payload() {
+        let mut args = PTYArgs::default();
+        args.cols = 80;
+        args.rows = 24;
+        let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(OsString::from("c:\\windows\\system32\\cmd.exe"), None, None, None).unwrap();
+        // Answer ConPTY's startup DA / CPR queries so it starts emitting
+        // output normally. Return value here is not asserted — this write is
+        // only priming the handshake.
+        pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
+        sleep(Duration::from_millis(500));
+
+        // Pure-ASCII, fits in one chunk. UTF-8 byte count == character count.
+        let payload = OsString::from("echo hello world\r\n");
+        let expected_bytes: u32 = 18;
+
+        let written = pty.write(payload).unwrap();
+        // ConPTY `AllocConsole` steals the test harness's stdout, so a
+        // panic or `ok` message doesn't reach cargo test's log. Record the
+        // observed count to a file so a human (or CI) can read it after.
+        let _ = std::fs::write(
+            std::env::temp_dir().join("winpty_rs_issue_133_small.txt"),
+            format!("expected={expected_bytes} written={written}\n"),
+        );
+        assert_eq!(
+            written, expected_bytes,
+            "defect 3: async write returned {written} for an {expected_bytes}-byte payload",
+        );
+    }
+
+    /// Reproducer for issue #133 (defects 1 + 3): a multi-chunk write
+    /// underreports the written bytes. The last chunk's completion is
+    /// collected from a stack-local copy of `write_overlapped` the kernel
+    /// never updated, and sync-completing chunks are never counted at all.
+    ///
+    /// With BUFFER_SIZE = 8192, 30_000 bytes splits into 4 chunks:
+    /// 8192 + 8192 + 8192 + 5424. Each chunk's completion is lost in a
+    /// different way; current code returns 0 for the whole write.
+    #[test]
+    fn test_write_returns_byte_count_multi_chunk() {
+        let mut args = PTYArgs::default();
+        args.cols = 80;
+        args.rows = 24;
+        let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(OsString::from("c:\\windows\\system32\\cmd.exe"), None, None, None).unwrap();
+        pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
+        sleep(Duration::from_millis(500));
+
+        // Mirror the shape from the report: 30 lines of 1,000 characters,
+        // each newline-terminated. A single 30,000-char blob with no newline
+        // is a worse case than anything real - a cooked-mode console input
+        // buffer can fill and stop draining the pipe, which stalls the write
+        // for reasons unrelated to the byte-count bug under test.
+        const LINES: u32 = 30;
+        const LINE_LEN: u32 = 1_000;
+        let line: String = std::iter::repeat('a').take(LINE_LEN as usize).collect();
+        let mut payload = String::new();
+        for _ in 0..LINES {
+            payload.push_str(&line);
+            payload.push('\r');
+            payload.push('\n');
+        }
+        // Pure ASCII, so the UTF-8 byte count equals the char count:
+        // 30 lines * (1000 chars + CRLF) = 30_060 bytes.
+        let expected_bytes: u32 = LINES * (LINE_LEN + 2);
+        assert_eq!(payload.len() as u32, expected_bytes, "payload built wrong");
+
+        let written = pty.write(OsString::from(payload)).unwrap();
+        let _ = std::fs::write(
+            std::env::temp_dir().join("winpty_rs_issue_133_multi.txt"),
+            format!("expected={expected_bytes} written={written}\n"),
+        );
+        assert_eq!(
+            written, expected_bytes,
+            "defects 1+3: multi-chunk async write returned {written} for a {expected_bytes}-byte payload",
+        );
+    }
 }
