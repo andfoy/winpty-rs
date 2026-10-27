@@ -1,7 +1,7 @@
-/// This module provides a [`super::PTY`] backend that uses
-/// [winpty](https://github.com/rprichard/winpty) as its implementation.
-/// This backend is useful as a fallback implementation to the newer ConPTY
-/// backend, which is only available on Windows 10 starting on build number 1809.
+//! This module provides a [`super::PTY`] backend that uses
+//! [winpty](https://github.com/rprichard/winpty) as its implementation.
+//! This backend is useful as a fallback implementation to the newer ConPTY
+//! backend, which is only available on Windows 10 starting on build number 1809.
 
 use bitflags::bitflags;
 use enum_primitive_derive::Primitive;

@@ -118,7 +118,6 @@ fn set_size_winpty() {
     let mut count = 0;
     while count < 5 || (cols != 90 && rows != 30) {
         pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
-        let regex = Regex::new(r".*Width.*").unwrap();
         let mut output_str = "";
         let mut out: OsString;
 
@@ -128,7 +127,6 @@ fn set_size_winpty() {
         }
 
         let parts: Vec<&str> = output_str.split("\r\n").collect();
-        let num_regex = Regex::new(r"\s+(\d+)\s+(\d+).*").unwrap();
         for part in parts {
             if num_regex.is_match(part) {
                 for cap in num_regex.captures_iter(part) {
@@ -166,7 +164,7 @@ fn is_alive_exitstatus_winpty() {
 
     pty.write("exit\r\n".into()).unwrap();
     while pty.is_alive().unwrap() {
-        ()
+        
     }
     assert!(!pty.is_alive().unwrap());
     assert_eq!(pty.get_exitstatus().unwrap(), Some(0))

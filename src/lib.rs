@@ -29,9 +29,7 @@ mod tests {
     #[test]
     fn test_write_performance() {
         // Initialize PTY with default arguments
-        let mut args = PTYArgs::default();
-        args.cols = 80;
-        args.rows = 24;
+        let args = PTYArgs { cols: 80, rows: 24, ..Default::default() };
         let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
 
         // Spawn cmd.exe
@@ -67,9 +65,7 @@ mod tests {
     #[test]
     fn test_read_performance() {
         // Initialize PTY with default arguments
-        let mut args = PTYArgs::default();
-        args.cols = 80;
-        args.rows = 24;
+        let args = PTYArgs { cols: 80, rows: 24, ..Default::default() };
         let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
 
         // Spawn cmd.exe with a command that produces continuous output
@@ -126,9 +122,7 @@ mod tests {
     #[test]
     fn test_nonblocking_read_performance() {
         // Initialize PTY with default arguments
-        let mut args = PTYArgs::default();
-        args.cols = 80;
-        args.rows = 24;
+        let args = PTYArgs { cols: 80, rows: 24, ..Default::default() };
 
         let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
         pty.spawn(
@@ -170,7 +164,7 @@ mod tests {
         println!("Total bytes read: {}", total_bytes);
         println!("Successful reads: {}", read_count);
         println!("Empty reads: {}", empty_reads);
-        println!("Average bytes per successful read: {}", if read_count > 0 { total_bytes / read_count } else { 0 });
+        println!("Average bytes per successful read: {}", total_bytes.checked_div(read_count).unwrap_or(0));
     }
 
     /// Reproducer for issue #133 (defect 3): on the async ConPTY path, a
@@ -182,9 +176,7 @@ mod tests {
     /// Actual (current code): returns 0.
     #[test]
     fn test_write_returns_byte_count_small_payload() {
-        let mut args = PTYArgs::default();
-        args.cols = 80;
-        args.rows = 24;
+        let args = PTYArgs { cols: 80, rows: 24, ..Default::default() };
         let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
         pty.spawn(OsString::from("c:\\windows\\system32\\cmd.exe"), None, None, None).unwrap();
         // Answer ConPTY's startup DA / CPR queries so it starts emitting
@@ -221,9 +213,7 @@ mod tests {
     /// different way; current code returns 0 for the whole write.
     #[test]
     fn test_write_returns_byte_count_multi_chunk() {
-        let mut args = PTYArgs::default();
-        args.cols = 80;
-        args.rows = 24;
+        let args = PTYArgs { cols: 80, rows: 24, ..Default::default() };
         let mut pty = PTY::new_with_backend(&args, PTYBackend::ConPTY).unwrap();
         pty.spawn(OsString::from("c:\\windows\\system32\\cmd.exe"), None, None, None).unwrap();
         pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
@@ -236,7 +226,7 @@ mod tests {
         // for reasons unrelated to the byte-count bug under test.
         const LINES: u32 = 30;
         const LINE_LEN: u32 = 1_000;
-        let line: String = std::iter::repeat('a').take(LINE_LEN as usize).collect();
+        let line: String = std::iter::repeat_n('a', LINE_LEN as usize).collect();
         let mut payload = String::new();
         for _ in 0..LINES {
             payload.push_str(&line);

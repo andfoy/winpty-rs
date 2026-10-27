@@ -1,7 +1,6 @@
 use glob::glob;
 use std::env;
 use std::env::consts::ARCH;
-use std::i64;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs::File;
@@ -16,9 +15,14 @@ use windows::core::{PCSTR, PCWSTR, PSTR, PWSTR};
 use windows_bindgen::bindgen;
 
 use enum_primitive_derive::Primitive;
-use num_traits::{FromPrimitive, ToPrimitive};
+use num_traits::FromPrimitive;
 
 
+// Variant names mirror the `IMAGE_FILE_MACHINE_*` constants in winnt.h
+// verbatim, so that matching a PE header against this enum can be checked
+// against Microsoft's documentation by eye. Renaming them to satisfy
+// `upper_case_acronyms` would break that correspondence for no benefit.
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Eq, PartialEq, Primitive)]
 enum PEMachineType {
     UNKNOWN	= 0x0,
@@ -58,22 +62,29 @@ enum PEMachineType {
 }
 
 
+// Complete set of Win32 string-pointer conversions. Not all are called
+// today; kept together so the set stays coherent, and build.rs is not
+// part of the shipped crate.
 #[cfg(windows)]
+#[allow(dead_code)]
 trait IntoPWSTR {
     fn into_pwstr(self) -> PWSTR;
 }
 
 #[cfg(windows)]
+#[allow(dead_code)]
 trait IntoPSTR {
     fn into_pstr(self) -> PSTR;
 }
 
 #[cfg(windows)]
+#[allow(dead_code)]
 trait IntoPCSTR {
     fn into_pcstr(self) -> PCSTR;
 }
 
 #[cfg(windows)]
+#[allow(dead_code)]
 trait IntoPCWSTR {
     fn into_pcwstr(self) -> PCWSTR;
 }
@@ -135,7 +146,7 @@ impl IntoPWSTR for String {
 
 #[cfg(windows)]
 fn command_ok(cmd: &mut Command) -> bool {
-    cmd.status().ok().map_or(false, |s| s.success())
+    cmd.status().ok().is_some_and(|s| s.success())
 }
 
 #[cfg(windows)]
@@ -203,7 +214,7 @@ fn get_output_path() -> PathBuf {
     let path = Path::new(&manifest_dir_string)
         .join("target")
         .join(build_type);
-    return PathBuf::from(path);
+    path
 }
 
 fn get_dll_target_arch(dll_path: PathBuf) -> PEMachineType {
@@ -266,7 +277,7 @@ fn main() {
         // CFG.exported_header_dirs.push(&Path::new(&manifest_dir));
         let conpty_enabled;
 
-        let current_path = env::current_dir().unwrap();
+        let _current_path = env::current_dir().unwrap();
 
         let args = [
             "--in",
@@ -296,7 +307,7 @@ fn main() {
         let major_version = command_output(
             Command::new("Reg")
                 .arg("Query")
-                .arg(&reg_entry)
+                .arg(reg_entry)
                 .arg("/v")
                 .arg("CurrentMajorVersionNumber"),
         );
@@ -307,7 +318,7 @@ fn main() {
         let build_version = command_output(
             Command::new("Reg")
                 .arg("Query")
-                .arg(&reg_entry)
+                .arg(reg_entry)
                 .arg("/v")
                 .arg("CurrentBuildNumber"),
         );
@@ -445,10 +456,8 @@ fn main() {
         let mut cmd = Command::new("winpty-agent");
         let mut winpty_enabled = "0";
         if command_ok(cmd.arg("--version")) {
-            // let winpty_path = cm
-            winpty_enabled = "1";
             let winpty_version = command_output(cmd.arg("--version"));
-            println!("Using Winpty version: {}", &winpty_version);
+            println!("Using Winpty version: {}", winpty_version);
 
             let winpty_location = which("winpty-agent").unwrap();
             let winpty_path = winpty_location.parent().unwrap();

@@ -112,7 +112,7 @@ pub trait PTYImpl: Sync + Send {
     /// * `cmdline` - Optional space-delimited arguments to provide to the executable.
     /// * `cwd` - Optional path from where the executable should be spawned.
     /// * `env` - Optional environment variables to provide to the process. Each
-    /// variable should be declared as `VAR=VALUE` and be separated by a NUL (0) character.
+    ///   variable should be declared as `VAR=VALUE` and be separated by a NUL (0) character.
     ///
     /// # Returns
     /// `true` if the call was successful, else an error will be returned.
@@ -250,9 +250,10 @@ fn read(
             S_OK
         } else {
             let err = Error::from_thread();
-            if let None = lp_overlapped {
-                Error::from_thread().into()
-            } else if err.code() != ERROR_IO_PENDING.into() {
+            // `ERROR_IO_PENDING` is only meaningful for an overlapped read;
+            // without an OVERLAPPED, or for any other code, this is a genuine
+            // failure.
+            if lp_overlapped.is_none() || err.code() != ERROR_IO_PENDING.into() {
                 Error::from_thread().into()
             } else {
                 awaiting_io = true;
@@ -275,11 +276,11 @@ fn read(
                         Error::from_thread().into()
                     } else {
                         *chars_read_ptr = (*overlapped).InternalHigh as u32;
-                        HRESULT((*overlapped).Internal as i32).into()
+                        HRESULT((*overlapped).Internal as i32)
                     }
                 } else {
                     *chars_read_ptr = (*overlapped).InternalHigh as u32;
-                    HRESULT((*overlapped).Internal as i32).into()
+                    HRESULT((*overlapped).Internal as i32)
                 }
             } else {
                 S_OK
@@ -562,10 +563,8 @@ impl PTYProcess {
         // Manual-reset event signaled by the reader thread when it exits. Teardown
         // waits on this (event-driven) instead of busy-polling `thread_arc`.
         let reader_exit_handle = unsafe {
-            match CreateEventExW(None, None, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS.0) {
-                Ok(evt) => evt,
-                Err(_) => HANDLE::default(),
-            }
+            CreateEventExW(None, None, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS.0)
+                .unwrap_or_default()
         };
         let reader_exit_event = LocalHandle::from(reader_exit_handle);
 
@@ -642,12 +641,8 @@ impl PTYProcess {
         } else {
             let mut write_overlapped = OVERLAPPED::default();
             unsafe {
-                match CreateEventExW(None, None, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS.0) {
-                    Ok(evt) => {
-                        write_overlapped.hEvent = evt;
-                    }
-
-                    Err(_) => (),
+                if let Ok(evt) = CreateEventExW(None, None, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS.0) {
+                    write_overlapped.hEvent = evt;
                 }
             }
 
@@ -664,13 +659,8 @@ impl PTYProcess {
             let reader_thread = thread::spawn(move || {
                 let mut read_overlapped = OVERLAPPED::default();
                 unsafe {
-                    match CreateEventExW(None, None, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS.0)
-                    {
-                        Ok(evt) => {
-                            read_overlapped.hEvent = evt;
-                        }
-
-                        Err(_) => (),
+                    if let Ok(evt) = CreateEventExW(None, None, CREATE_EVENT_MANUAL_RESET, EVENT_ALL_ACCESS.0) {
+                        read_overlapped.hEvent = evt;
                     }
                 }
 
@@ -752,7 +742,7 @@ impl PTYProcess {
                         // consumer (e.g. ConPTY's cleanup_thread) can release
                         // resources via ClosePseudoConsole.
                         if let Some(tx) = cleanup_tx {
-                            let _ = tx.send(true).unwrap_or(());
+                            tx.send(true).unwrap_or(());
                         }
                     }
                 }

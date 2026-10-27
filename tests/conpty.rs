@@ -153,7 +153,6 @@ fn set_size_conpty() {
     let mut count = 0;
     while count < 5 || (cols != 90 && rows != 30) {
         pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
-        let regex = Regex::new(r".*Width.*").unwrap();
         let mut output_str = "";
         let mut out = OsString::new();
 
@@ -165,7 +164,6 @@ fn set_size_conpty() {
         println!("{:?}", output_str);
 
         let mut collect_vec: Vec<String> = Vec::new();
-        let num_regex = Regex::new(r".*\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
         let mut collected_str = out.into_string().unwrap();
         collect_vec.push(collected_str.clone());
 
@@ -210,7 +208,7 @@ fn is_alive_exitstatus_conpty() {
 
     pty.write("exit\r\n".into()).unwrap();
     while pty.is_alive().unwrap() {
-        ()
+        
     }
     assert!(!pty.is_alive().unwrap());
     assert_eq!(pty.get_exitstatus().unwrap(), Some(0))

@@ -3,8 +3,7 @@ use windows::core::HRESULT;
 use windows::core::{Error, Owned, PCWSTR, PWSTR};
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::{
-    NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
-    FILE_OPEN_IF, FILE_PIPE_BYTE_STREAM_MODE, FILE_PIPE_BYTE_STREAM_TYPE,
+    NtCreateFile, FILE_CREATE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_PIPE_BYTE_STREAM_MODE, FILE_PIPE_BYTE_STREAM_TYPE,
     FILE_PIPE_QUEUE_OPERATION, FILE_SYNCHRONOUS_IO_NONALERT,
 };
 use windows::Win32::Foundation::{
@@ -17,11 +16,9 @@ use windows::Win32::Storage::FileSystem::{
     SYNCHRONIZE,
 };
 use windows::Win32::System::Console::{
-    AllocConsole, FreeConsole, GetConsoleMode, GetConsoleWindow, SetConsoleMode, SetStdHandle,
-    CONSOLE_MODE, COORD, ENABLE_VIRTUAL_TERMINAL_PROCESSING, HPCON, STD_ERROR_HANDLE,
-    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    AllocConsole, FreeConsole, GetConsoleMode, GetConsoleWindow, SetConsoleMode,
+    CONSOLE_MODE, COORD, ENABLE_VIRTUAL_TERMINAL_PROCESSING, HPCON,
 };
-use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess,
     InitializeProcThreadAttributeList, UpdateProcThreadAttribute, CREATE_UNICODE_ENVIRONMENT,
@@ -34,11 +31,11 @@ use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
 use super::win_bindings::Windows::Wdk::Storage::FileSystem::NtCreateNamedPipeFile;
 // use windows_strings::PWSTR;
 
-use std::ffi::{c_void, OsString};
+use std::ffi::OsString;
 use std::mem::MaybeUninit;
 use std::ops::DerefMut;
 use std::os::windows::ffi::OsStrExt;
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{mem, ptr, thread};
 
@@ -55,6 +52,10 @@ pub struct ConPTY {
     process: PTYProcess,
     console_allocated: bool,
     release_info_tx: mpsc::Sender<(isize, isize, isize, isize, bool)>,
+    // Held, not read: owning the JoinHandle keeps the cleanup thread
+    // alive for as long as the ConPTY does. Dropping it would detach
+    // the thread.
+    #[allow(dead_code)]
     cleanup_thread: JoinHandle<()>,
     cleanup_tx: mpsc::Sender<bool>
 }
@@ -92,7 +93,7 @@ impl PTYImpl for ConPTY {
             // Create a console window in case ConPTY is running in a GUI application.
             let console_allocated = AllocConsole().is_ok();
             if console_allocated {
-                let _ = ShowWindow(GetConsoleWindow(), SW_HIDE).unwrap();
+                ShowWindow(GetConsoleWindow(), SW_HIDE).unwrap();
             }
 
             // Recreate the standard stream inputs in case the parent process
@@ -139,7 +140,7 @@ impl PTYImpl for ConPTY {
                 return Err(string);
             }
 
-            let h_in = h_in_res.unwrap();
+            let _h_in = h_in_res.unwrap();
 
             let mut console_mode_un = MaybeUninit::<CONSOLE_MODE>::uninit();
             let console_mode_ref = console_mode_un.as_mut_ptr();
@@ -185,8 +186,8 @@ impl PTYImpl for ConPTY {
             let mut output_write_side = INVALID_HANDLE_VALUE;
 
             // - Hold onto these and use them for communication with the child through the pseudoconsole.
-            let mut output_read_side = INVALID_HANDLE_VALUE;
-            let mut input_write_side = INVALID_HANDLE_VALUE;
+            let _output_read_side = INVALID_HANDLE_VALUE;
+            let _input_write_side = INVALID_HANDLE_VALUE;
 
             // Setup PTY size
             let size = COORD {
@@ -401,25 +402,22 @@ impl PTYImpl for ConPTY {
             let hpcon_clone = Arc::clone(&hpcon_mutex);
 
             let cleanup_thread = thread::spawn(move || {
-                match release_info_rx.recv() {
-                    Ok((_hthread_ptr, _hprocess_ptr, _startup_ptr, hpcon_ptr, console_allocated))=>{
-                        if let Ok(clean) = cleanup_rx.recv(){
-                            if clean {
-                                let mut hpcon_guard = hpcon_clone.lock().unwrap();
-                                if hpcon_guard.1 {
-                                    cleanup(
-                                        // LocalHandle(hthread_ptr as *mut c_void),
-                                        // LocalHandle(hprocess_ptr as *mut c_void),
-                                        // LPPROC_THREAD_ATTRIBUTE_LIST(startup_ptr as *mut c_void),
-                                        hpcon_guard.0.0,
-                                        console_allocated,
-                                    );
-                                    *hpcon_guard = (hpcon_guard.0, false);
-                                }
+                if let Ok((_hthread_ptr, _hprocess_ptr, _startup_ptr, _hpcon_ptr, console_allocated)) = release_info_rx.recv() {
+                    if let Ok(clean) = cleanup_rx.recv(){
+                        if clean {
+                            let mut hpcon_guard = hpcon_clone.lock().unwrap();
+                            if hpcon_guard.1 {
+                                cleanup(
+                                    // LocalHandle(hthread_ptr as *mut c_void),
+                                    // LocalHandle(hprocess_ptr as *mut c_void),
+                                    // LPPROC_THREAD_ATTRIBUTE_LIST(startup_ptr as *mut c_void),
+                                    hpcon_guard.0.0,
+                                    console_allocated,
+                                );
+                                *hpcon_guard = (hpcon_guard.0, false);
                             }
                         }
-                    },
-                    Err(_)=>{}
+                    }
                 }
                 drop(cleanup_rx);
                 drop(release_info_rx);
