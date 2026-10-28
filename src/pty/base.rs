@@ -201,6 +201,22 @@ pub trait PTYImpl: Sync + Send {
     fn cancel_io(&self) -> Result<bool, OsString>;
 }
 
+/// Render a `HRESULT` as text for a caller.
+///
+/// `HRESULT::message()` yields an empty string whenever no message table can
+/// resolve the code: `FormatMessageW` fails and the empty result is returned
+/// as-is. An error with nothing in it tells a caller nothing - it is what made
+/// andfoy/pywinpty#565 so hard to read - so fall back to the numeric code,
+/// which at least identifies the failure.
+fn error_text(result: HRESULT) -> OsString {
+    let message = result.message();
+    if message.is_empty() {
+        OsString::from(format!("Unknown error (HRESULT 0x{:08X})", result.0 as u32))
+    } else {
+        OsString::from(message)
+    }
+}
+
 /// Build the `lpCommandLine` prefix that supplies the child's `argv[0]`.
 ///
 /// Both backends pass the executable at the head of `lpCommandLine`, because
@@ -319,9 +335,7 @@ fn read(
                 };
 
                 if result.is_err() {
-                    let result_msg = result.message();
-                    let string = OsString::from(result_msg);
-                    return Err(string);
+                    return Err(error_text(result));
                 }
             }
         } else {
@@ -336,9 +350,7 @@ fn read(
                 };
 
                 if result.is_err() {
-                    let result_msg = result.message();
-                    let string = OsString::from(result_msg);
-                    return Err(string);
+                    return Err(error_text(result));
                 }
                 size.assume_init();
             }
@@ -375,9 +387,7 @@ fn read(
         };
 
         if result.is_err() {
-            let result_msg = result.message();
-            let string = OsString::from(result_msg);
-            return Err(string);
+            return Err(error_text(result));
         }
 
         if let Some(overlapped) = lp_overlapped {
@@ -386,8 +396,7 @@ fn read(
                     && WaitForSingleObjectEx((*overlapped).hEvent, INFINITE, false)
                         != WAIT_OBJECT_0
                 {
-                    let result_msg = Into::<HRESULT>::into(Error::from_thread()).message();
-                    return Err(OsString::from(result_msg));
+                    return Err(error_text(Error::from_thread().into()));
                 }
 
                 *chars_read_ptr = (*overlapped).InternalHigh as u32;
@@ -398,7 +407,7 @@ fn read(
                     // reporting it as an error is what left consumers unable
                     // to tell a closed stream from a broken one.
                     ReadStatus::Eof => return Ok((OsString::new(), false)),
-                    ReadStatus::Failed(err) => return Err(OsString::from(err.message())),
+                    ReadStatus::Failed(err) => return Err(error_text(err)),
                 }
             }
 
@@ -447,9 +456,7 @@ fn is_alive(process: HANDLE) -> Result<bool, OsString> {
             Ok(alive)
         } else {
             let err: HRESULT = Error::from_thread().into();
-            let result_msg = err.message();
-            let string = OsString::from(result_msg);
-            Err(string)
+            Err(error_text(err))
         }
     }
 }
@@ -463,9 +470,7 @@ fn wait_for_exit(process: HANDLE) -> Result<bool, OsString> {
             Ok(dead)
         } else {
             let err: HRESULT = Error::from_thread().into();
-            let result_msg = err.message();
-            let string = OsString::from(result_msg);
-            Err(string)
+            Err(error_text(err))
         }
     }
 }
@@ -488,9 +493,7 @@ fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
             Ok(exitstatus)
         } else {
             let err: HRESULT = Error::from_thread().into();
-            let result_msg = err.message();
-            let string = OsString::from(result_msg);
-            Err(string)
+            Err(error_text(err))
         }
     }
 }
@@ -635,7 +638,7 @@ unsafe fn drain_overlapped(
             return Ok(transferred);
         }
         let err: HRESULT = Error::from_thread().into();
-        return Err(OsString::from(err.message()));
+        return Err(error_text(err));
     }
 
     // Timed out (or the wait itself failed). Cancel so the kernel stops
@@ -1026,9 +1029,7 @@ impl PTYProcess {
                         Error::from_thread().into()
                     };
                     if write_result.is_err() {
-                        let result_msg = write_result.message();
-                        let string = OsString::from(result_msg);
-                        return Err(string);
+                        return Err(error_text(write_result));
                     }
                     total_written += bytes_written.assume_init();
                 }
@@ -1126,7 +1127,7 @@ impl PTYProcess {
                         Err(msg) => Err(msg),
                     }
                 }
-                Err(err) => Err(OsString::from(err.message())),
+                Err(err) => Err(error_text(err.into())),
             }
         }
     }
@@ -1238,10 +1239,7 @@ impl PTYProcess {
             if CancelIoEx(Into::<HANDLE>::into(self.conout), None).is_ok() {
                 Ok(true)
             } else {
-                let result: HRESULT = Error::from_thread().into();
-                let result_msg = result.message();
-                let string = OsString::from(result_msg);
-                Err(string)
+                Err(error_text(Error::from_thread().into()))
             }
         }
     }

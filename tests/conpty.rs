@@ -93,6 +93,22 @@ fn read_write_conpty() {
 
 #[test]
 fn set_size_conpty() {
+    // These loops busy-wait on `read(false)`, which returns an empty string
+    // whenever nothing is queued - so with nothing to read they spin forever.
+    // That used to be masked: a read error ended the test with a panic
+    // instead. Now that a closed stream reports EOF rather than failing, an
+    // unbounded loop here would hang CI, so give the whole test a deadline.
+    let test_deadline = std::time::Instant::now() + Duration::from_secs(120);
+    macro_rules! still_waiting {
+        ($what:expr) => {
+            assert!(
+                std::time::Instant::now() < test_deadline,
+                "timed out waiting for {}",
+                $what
+            )
+        };
+    }
+
     let pty_args = PTYArgs {
         cols: 80,
         rows: 25,
@@ -115,6 +131,7 @@ fn set_size_conpty() {
     let mut out = OsString::new();
 
     while !regex.is_match(output_str) {
+        still_waiting!("the shell prompt");
         out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
     }
@@ -125,6 +142,7 @@ fn set_size_conpty() {
     collect_vec.push(collected_str.clone());
 
     while !num_regex.is_match(&collected_str) {
+        still_waiting!("the initial window size");
         let out = pty.read(false).unwrap();
         collect_vec.push(out.into_string().unwrap());
         collected_str = collect_vec.join("");
@@ -154,11 +172,13 @@ fn set_size_conpty() {
 
     let mut count = 0;
     while count < 5 || (cols != 90 && rows != 30) {
+        still_waiting!("the window size to report 90x30");
         pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
         let mut output_str = "";
         let mut out = OsString::new();
 
         while !regex.is_match(output_str) {
+            still_waiting!("the prompt after resizing");
             out = pty.read(false).unwrap();
             output_str = out.to_str().unwrap();
         }
@@ -170,6 +190,7 @@ fn set_size_conpty() {
         collect_vec.push(collected_str.clone());
 
         while !num_regex.is_match(&collected_str) {
+            still_waiting!("the resized window size");
             let out = pty.read(false).unwrap();
             collect_vec.push(out.into_string().unwrap());
             collected_str = collect_vec.join("");
