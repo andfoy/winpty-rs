@@ -543,6 +543,23 @@ pub struct PTYProcess {
     /// exits. Nothing can be queued once it is `false`, which is what makes
     /// it the basis of `is_eof`.
     reader_running: Arc<AtomicBool>,
+    /// The output handle, as seen by the detached `alive_thread`, or `None`
+    /// once teardown has closed it.
+    ///
+    /// `alive_thread` outlives `drop` - it is deliberately not joined, see
+    /// there - and its job is to `CancelIoEx` the output handle to unstick the
+    /// reader. But `drop` closes that handle, and on the ConPTY backend
+    /// `conin` and `conout` are the *same* handle, so closing `conin` closes
+    /// it. Cancelling afterwards would be a use-after-close: harmless if the
+    /// value is simply invalid, but if Windows has reused it for something the
+    /// host process opened in the meantime, we would abort *its* I/O and it
+    /// would see `ERROR_OPERATION_ABORTED` on a read it owns.
+    ///
+    /// So the handle is handed over under a lock that `drop` clears before
+    /// closing anything. Cancelling and closing can then not interleave, and
+    /// once `drop` has run there is nothing to cancel anyway - closing the
+    /// pipe unsticks the reader by itself.
+    cancel_guard: Option<Arc<Mutex<Option<LocalHandle>>>>,
     /// Manual-reset event signaled by the reader thread on exit; lets teardown wait
     /// event-driven instead of busy-looping on `reader_running`.
     reader_exit_event: LocalHandle,
@@ -742,6 +759,7 @@ impl PTYProcess {
                 alive_thread: None,
                 reader_alive: reader_alive_tx,
                 reader_running: thread_arc,
+                cancel_guard: None,
                 reader_exit_event,
                 reader_process_out: reader_process_tx,
                 reader_ready: reader_arc,
@@ -776,6 +794,9 @@ impl PTYProcess {
             let reader_progress = Arc::new(AtomicUsize::new(0));
             let reader_progress_for_thread = Arc::clone(&reader_progress);
             let reader_progress_for_alive = Arc::clone(&reader_progress);
+            // See `PTYProcess::cancel_guard`.
+            let cancel_guard = Arc::new(Mutex::new(Some(conout)));
+            let cancel_guard_for_alive = Arc::clone(&cancel_guard);
 
             let reader_thread = thread::spawn(move || {
                 let mut read_overlapped = OVERLAPPED::default();
@@ -872,8 +893,22 @@ impl PTYProcess {
                             }
                         }
 
-                        if !reader_exited {
-                            let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
+                        // Cancel only while the handle is still ours; see
+                        // `PTYProcess::cancel_guard`. A `false` return means
+                        // teardown has taken it, and teardown unsticks the
+                        // reader by closing the pipe itself.
+                        let cancel = || match cancel_guard_for_alive.lock() {
+                            Ok(guard) => match *guard {
+                                Some(handle) => {
+                                    let _ = CancelIoEx(Into::<HANDLE>::into(handle), None);
+                                    true
+                                }
+                                None => false,
+                            },
+                            Err(_) => false,
+                        };
+
+                        if !reader_exited && cancel() {
                             // Bounded. This used to spin forever if the
                             // reader never signalled, which wedges this
                             // thread and, worse, withholds the cleanup
@@ -893,7 +928,9 @@ impl PTYProcess {
                                     // leaking it along with this thread.
                                     break;
                                 }
-                                let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
+                                if !cancel() {
+                                    break;
+                                }
                             }
                         }
                         // Reader has drained and exited. Signal cleanup so the
@@ -917,6 +954,7 @@ impl PTYProcess {
                 alive_thread: Some(alive_thread),
                 reader_alive: reader_alive_tx,
                 reader_running: thread_arc,
+                cancel_guard: Some(cancel_guard),
                 reader_exit_event,
                 reader_process_out: reader_process_tx,
                 reader_ready: reader_arc,
@@ -1294,6 +1332,15 @@ impl Drop for PTYProcess {
             if let Some(thread_handle) = self.reading_thread.take() {
                 if reader_exited {
                     let _ = thread_handle.join();
+                }
+            }
+
+            // Take the output handle away from `alive_thread` before closing
+            // it, so it cannot cancel I/O on a handle value Windows may have
+            // already handed to something else. See `cancel_guard`.
+            if let Some(guard) = &self.cancel_guard {
+                if let Ok(mut handle) = guard.lock() {
+                    *handle = None;
                 }
             }
 
