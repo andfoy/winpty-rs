@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use regex::Regex;
+use std::time::{Duration, Instant};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -202,4 +203,74 @@ pub fn pty_processes_created(
         })
         .map(|(pid, image)| (*pid, image.clone()))
         .collect()
+}
+
+/// How long to wait between polls of a non-blocking read.
+const READ_POLL: Duration = Duration::from_millis(10);
+
+/// Read into `buf` until its *accumulated* contents match `pattern`.
+///
+/// Two reasons this exists rather than a bare loop:
+///
+/// * **Accumulation.** Several of these tests used to match against only the
+///   most recent read, so a pattern split across two chunks was never seen -
+///   `.*Width.*` had to land inside a single 32 KiB read to be noticed.
+/// * **Sleeping.** `PTY::read(false)` returns an empty string immediately when
+///   nothing is queued, so an unslept loop is a hot spin. It costs about a
+///   microsecond per turn now, and on a two-core CI runner that pegs a core
+///   and starves the very child the test is waiting on.
+///
+/// Bounded, so a test that will never see its pattern fails with the output it
+/// did collect instead of hanging. That is also why this polls rather than
+/// using `PTY::read(true)`: a blocking read takes no timeout - it waits on the
+/// reader channel indefinitely - so output that never arrives would hang the
+/// job until the workflow's 25-minute limit, with nothing to show for it.
+pub fn read_until_into(
+    pty: &winptyrs::PTY,
+    buf: &mut String,
+    pattern: &Regex,
+    budget: Duration,
+) -> Result<(), String> {
+    if pattern.is_match(buf) {
+        return Ok(());
+    }
+
+    let deadline = Instant::now() + budget;
+    while Instant::now() < deadline {
+        let chunk = match pty.read(false) {
+            Ok(chunk) => chunk.to_string_lossy().into_owned(),
+            Err(err) => {
+                return Err(format!(
+                    "read failed while waiting for {pattern:?}: {:?} (collected {buf:?})",
+                    err.to_string_lossy()
+                ))
+            }
+        };
+        let was_idle = chunk.is_empty();
+        buf.push_str(&chunk);
+
+        if pattern.is_match(buf) {
+            return Ok(());
+        }
+
+        // Only yield when there was nothing to take. While output is flowing
+        // this runs flat out; it is the idle turns that would otherwise spin.
+        if was_idle {
+            std::thread::sleep(READ_POLL);
+        }
+    }
+
+    Err(format!(
+        "timed out after {budget:?} waiting for {pattern:?}; collected {buf:?}"
+    ))
+}
+
+/// Pull the last `(cols, rows)` pair out of PowerShell's `WindowSize` table.
+///
+/// The last one, because a buffer may hold several probes and only the most
+/// recent reflects the current size.
+pub fn last_size(pattern: &Regex, text: &str) -> Option<(i32, i32)> {
+    pattern.captures_iter(text).last().and_then(|caps| {
+        Some((caps.get(1)?.as_str().parse().ok()?, caps.get(2)?.as_str().parse().ok()?))
+    })
 }

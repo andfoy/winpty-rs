@@ -58,6 +58,12 @@ fn read_write_conpty() {
     while !regex.is_match(output_str) && tries < 100 {
         out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
+        // Yield only when there was nothing to take: `read(false)`
+        // returns immediately when nothing is queued, and spinning on
+        // that starves the child on a small runner.
+        if output_str.is_empty() {
+            sleep(Duration::from_millis(10));
+        }
         println!("{:?}", output_str);
         tries += 1;
     }
@@ -71,6 +77,12 @@ fn read_write_conpty() {
     while !echo_regex.is_match(output_str) {
         out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
+        // Yield only when there was nothing to take: `read(false)`
+        // returns immediately when nothing is queued, and spinning on
+        // that starves the child on a small runner.
+        if output_str.is_empty() {
+            sleep(Duration::from_millis(10));
+        }
         println!("{:?}", output_str);
     }
 
@@ -83,6 +95,12 @@ fn read_write_conpty() {
     while !out_regex.is_match(output_str) {
         out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
+        // Yield only when there was nothing to take: `read(false)`
+        // returns immediately when nothing is queued, and spinning on
+        // that starves the child on a small runner.
+        if output_str.is_empty() {
+            sleep(Duration::from_millis(10));
+        }
         println!("Last: {:?}", output_str);
     }
 
@@ -93,21 +111,9 @@ fn read_write_conpty() {
 
 #[test]
 fn set_size_conpty() {
-    // These loops busy-wait on `read(false)`, which returns an empty string
-    // whenever nothing is queued - so with nothing to read they spin forever.
-    // That used to be masked: a read error ended the test with a panic
-    // instead. Now that a closed stream reports EOF rather than failing, an
-    // unbounded loop here would hang CI, so give the whole test a deadline.
-    let test_deadline = std::time::Instant::now() + Duration::from_secs(120);
-    macro_rules! still_waiting {
-        ($what:expr) => {
-            assert!(
-                std::time::Instant::now() < test_deadline,
-                "timed out waiting for {}",
-                $what
-            )
-        };
-    }
+    // Each wait is bounded and accumulating; see `common::read_until_into`.
+    const BUDGET: Duration = Duration::from_secs(60);
+    const MAX_PROBES: usize = 20;
 
     let pty_args = PTYArgs {
         cols: 80,
@@ -117,91 +123,50 @@ fn set_size_conpty() {
         agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES
     };
 
-    let appname = OsString::from("C:\\Windows\\System32\\cmd.exe");
+    let appname = OsString::from(r"C:\Windows\System32\cmd.exe");
     let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
     pty.spawn(appname, None, None, None).unwrap();
 
     pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
-    // sleep(Duration::from_millis(5000));
-
-    pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
-    let regex = Regex::new(r".*Width.*").unwrap();
-    let mut output_str = "";
-    let mut out = OsString::new();
-
-    while !regex.is_match(output_str) {
-        still_waiting!("the shell prompt");
-        out = pty.read(false).unwrap();
-        output_str = out.to_str().unwrap();
-    }
-
-    let mut collect_vec: Vec<String> = Vec::new();
+    let header_regex = Regex::new(r".*Width.*").unwrap();
     let num_regex = Regex::new(r".*\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
-    let mut collected_str = out.into_string().unwrap();
-    collect_vec.push(collected_str.clone());
+    let probe = "powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n";
 
-    while !num_regex.is_match(&collected_str) {
-        still_waiting!("the initial window size");
-        let out = pty.read(false).unwrap();
-        collect_vec.push(out.into_string().unwrap());
-        collected_str = collect_vec.join("");
-    }
+    // Ask for the window size, then wait for the table header and its numbers.
+    pty.write(probe.into()).unwrap();
+    let mut collected = String::new();
+    common::read_until_into(&pty, &mut collected, &header_regex, BUDGET).unwrap();
+    common::read_until_into(&pty, &mut collected, &num_regex, BUDGET).unwrap();
 
-    let mut rows: i32 = -1;
-    let mut cols: i32 = -1;
-
-    for cap in num_regex.captures_iter(&collected_str) {
-        cols = cap[1].parse().unwrap();
-        rows = cap[2].parse().unwrap();
-    }
+    let (mut cols, mut rows) =
+        common::last_size(&num_regex, &collected).expect("a window size");
 
     assert_eq!(rows, pty_args.rows);
     assert_eq!(cols, pty_args.cols);
 
     pty.set_size(90, 30).unwrap();
 
-    // if &env::var("CI").unwrap_or("0".to_owned()) == "1" {
-    //     return;
-    // }
+    for _ in 0..4 {
+        pty.write("cls\r\n".into()).unwrap();
+    }
 
-    pty.write("cls\r\n".into()).unwrap();
-    pty.write("cls\r\n".into()).unwrap();
-    pty.write("cls\r\n".into()).unwrap();
-    pty.write("cls\r\n".into()).unwrap();
+    // The resize takes a moment to show up, so probe until it does - each
+    // probe into a fresh buffer, so the size read back is the current one.
+    let mut probes = 0;
+    while probes < 5 || (cols != 90 && rows != 30) {
+        assert!(
+            probes < MAX_PROBES,
+            "window size still {cols}x{rows} after {probes} probes, expected 90x30"
+        );
 
-    let mut count = 0;
-    while count < 5 || (cols != 90 && rows != 30) {
-        still_waiting!("the window size to report 90x30");
-        pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
-        let mut output_str = "";
-        let mut out = OsString::new();
+        pty.write(probe.into()).unwrap();
+        let mut collected = String::new();
+        common::read_until_into(&pty, &mut collected, &header_regex, BUDGET).unwrap();
+        common::read_until_into(&pty, &mut collected, &num_regex, BUDGET).unwrap();
 
-        while !regex.is_match(output_str) {
-            still_waiting!("the prompt after resizing");
-            out = pty.read(false).unwrap();
-            output_str = out.to_str().unwrap();
-        }
-
-        println!("{:?}", output_str);
-
-        let mut collect_vec: Vec<String> = Vec::new();
-        let mut collected_str = out.into_string().unwrap();
-        collect_vec.push(collected_str.clone());
-
-        while !num_regex.is_match(&collected_str) {
-            still_waiting!("the resized window size");
-            let out = pty.read(false).unwrap();
-            collect_vec.push(out.into_string().unwrap());
-            collected_str = collect_vec.join("");
-        }
-
-        for cap in num_regex.captures_iter(&collected_str) {
-            cols = cap[1].parse().unwrap();
-            rows = cap[2].parse().unwrap();
-        }
-
-        count += 1;
+        (cols, rows) = common::last_size(&num_regex, &collected).expect("a window size");
+        probes += 1;
     }
 
     assert_eq!(cols, 90);
