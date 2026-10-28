@@ -93,6 +93,22 @@ fn read_write_conpty() {
 
 #[test]
 fn set_size_conpty() {
+    // These loops busy-wait on `read(false)`, which returns an empty string
+    // whenever nothing is queued - so with nothing to read they spin forever.
+    // That used to be masked: a read error ended the test with a panic
+    // instead. Now that a closed stream reports EOF rather than failing, an
+    // unbounded loop here would hang CI, so give the whole test a deadline.
+    let test_deadline = std::time::Instant::now() + Duration::from_secs(120);
+    macro_rules! still_waiting {
+        ($what:expr) => {
+            assert!(
+                std::time::Instant::now() < test_deadline,
+                "timed out waiting for {}",
+                $what
+            )
+        };
+    }
+
     let pty_args = PTYArgs {
         cols: 80,
         rows: 25,
@@ -115,6 +131,7 @@ fn set_size_conpty() {
     let mut out = OsString::new();
 
     while !regex.is_match(output_str) {
+        still_waiting!("the shell prompt");
         out = pty.read(false).unwrap();
         output_str = out.to_str().unwrap();
     }
@@ -125,6 +142,7 @@ fn set_size_conpty() {
     collect_vec.push(collected_str.clone());
 
     while !num_regex.is_match(&collected_str) {
+        still_waiting!("the initial window size");
         let out = pty.read(false).unwrap();
         collect_vec.push(out.into_string().unwrap());
         collected_str = collect_vec.join("");
@@ -154,11 +172,13 @@ fn set_size_conpty() {
 
     let mut count = 0;
     while count < 5 || (cols != 90 && rows != 30) {
+        still_waiting!("the window size to report 90x30");
         pty.write("powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n".into()).unwrap();
         let mut output_str = "";
         let mut out = OsString::new();
 
         while !regex.is_match(output_str) {
+            still_waiting!("the prompt after resizing");
             out = pty.read(false).unwrap();
             output_str = out.to_str().unwrap();
         }
@@ -170,6 +190,7 @@ fn set_size_conpty() {
         collect_vec.push(collected_str.clone());
 
         while !num_regex.is_match(&collected_str) {
+            still_waiting!("the resized window size");
             let out = pty.read(false).unwrap();
             collect_vec.push(out.into_string().unwrap());
             collected_str = collect_vec.join("");
@@ -264,20 +285,33 @@ fn check_eof_output() {
     let mut collect_vec: Vec<String> = Vec::new();
     let mut valid = true;
 
+    // Bounded, so that an `is_eof` that stops reporting EOF fails this test
+    // instead of hanging it.
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+
     while valid {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "never reached EOF; collected so far: {:?}",
+            collect_vec.join("")
+        );
+
         let out_wrapped = pty.read(true);
         match out_wrapped {
             Ok(out) =>{
                 println!("{:?}", out);
                 collect_vec.push(out.clone().into_string().unwrap());
-                if out.is_empty() && !pty.is_eof().unwrap() {
+                // Stop once there is nothing left to read *and* the stream has
+                // ended. This used to be `&& !pty.is_eof()`, which is
+                // backwards; it only terminated because `is_eof` could never
+                // return `true`, so it stopped at the first empty read
+                // instead.
+                if out.is_empty() && pty.is_eof().unwrap() {
                     valid = false;
                 }
             },
             Err(_) => {valid = false;}
         }
-
-        // valid = valid && !pty.is_eof().unwrap();
     }
 
     let output_str = collect_vec.join("");
@@ -478,6 +512,189 @@ fn spawn_spaced_appname_keeps_argv_conpty() {
     }
 }
 
+/// `is_eof` has to report EOF once the child has gone and its output is
+/// drained, and the stream has to wind down promptly.
+///
+/// Regression test for andfoy/pywinpty#423, #519 and #565. Three defects met
+/// here:
+///
+/// * `is_eof` could never return `true`. It was `!(PeekNamedPipe(..).is_ok()
+///   || is_alive || reader_atomic)`, and the peek succeeds for as long as the
+///   handle is valid, so the first term alone always won.
+/// * teardown waited a flat 5 s for an event ConPTY never raises on its own,
+///   so a blocking read after the child exited took ~5.1 s to return against
+///   0.059 s on WinPTY.
+/// * the read then failed with an `NTSTATUS` cast straight into an `HRESULT`,
+///   which no message table could resolve - so it surfaced as
+///   `WinptyError('')`, an error with nothing in it.
+#[test]
+fn is_eof_after_child_exits_conpty() {
+    use std::time::Instant;
+
+    const MARKER: &str = "WINPTYRS_EOF_OK";
+
+    let pty_args = PTYArgs {
+        cols: 120,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+    pty.spawn(
+        OsString::from(r"C:\Windows\System32\cmd.exe"),
+        Some(OsString::from(format!("/c echo {MARKER}"))),
+        None,
+        None,
+    )
+    .unwrap();
+
+    // Drain non-blocking until the marker has arrived and the child is gone.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut collected = String::new();
+    let mut empty_errors = 0;
+    while Instant::now() < deadline {
+        match pty.read(false) {
+            Ok(out) => collected.push_str(&out.to_string_lossy()),
+            Err(err) => {
+                if err.is_empty() {
+                    empty_errors += 1;
+                }
+            }
+        }
+        if collected.contains(MARKER) && !pty.is_alive().unwrap() {
+            break;
+        }
+        sleep(Duration::from_millis(50));
+    }
+
+    assert!(
+        collected.contains(MARKER),
+        "the child's output never arrived. Got: {collected:?}"
+    );
+
+    // A blocking read once the child has exited must not sit through a fixed
+    // timeout waiting for an event that is not coming.
+    let started = Instant::now();
+    let last = pty.read(true);
+    let blocked_for = started.elapsed();
+    eprintln!("blocking read after child exit returned in {blocked_for:?}");
+
+    if let Err(err) = &last {
+        assert!(
+            !err.is_empty(),
+            "the final read failed with an empty message, so callers cannot tell \
+             a closed stream from a broken one"
+        );
+    }
+
+    assert!(
+        blocked_for < Duration::from_secs(3),
+        "a blocking read after the child exited took {blocked_for:?}; \
+         teardown is waiting on a fixed deadline again"
+    );
+
+    // And EOF has to actually be reported.
+    let eof_deadline = Instant::now() + Duration::from_secs(5);
+    let mut eof = false;
+    while Instant::now() < eof_deadline {
+        if pty.is_eof().unwrap() {
+            eof = true;
+            break;
+        }
+        sleep(Duration::from_millis(50));
+    }
+
+    assert!(
+        eof,
+        "is_eof() never reported EOF although the child exited and its output was drained"
+    );
+    assert_eq!(
+        empty_errors, 0,
+        "{empty_errors} read(s) failed with an empty error message"
+    );
+}
+
+
+/// Output still in flight when the child exits must be handed over in full.
+///
+/// This is the case teardown can get wrong in the dangerous direction. The
+/// reader's pending read has to be cancelled at some point - ConPTY does not
+/// always close the pipe on its own - but cancelling it while conhost is still
+/// streaming would truncate the tail *and* report EOF, losing data silently.
+///
+/// Teardown therefore waits on the reader's progress rather than a deadline:
+/// every delivery resets the idle timer, so a drain that is still moving is
+/// never cut off. This test is the guard on that, and deliberately drains with
+/// no sleep so it races the writer.
+#[test]
+fn trailing_output_survives_child_exit_conpty() {
+    use std::time::Instant;
+
+    const LINES: usize = 200_000;
+
+    let Some(dir) = common::spaced_dir("conpty bulk") else {
+        eprintln!("could not create a scratch directory; skipping");
+        return;
+    };
+    let Some(writer) = common::build_bulk_writer(&dir) else {
+        eprintln!("rustc not available to build the bulk writer; skipping");
+        return;
+    };
+
+    let pty_args = PTYArgs {
+        cols: 200,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+    pty.spawn(
+        writer.into_os_string(),
+        Some(OsString::from(LINES.to_string())),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut collected = String::new();
+    let mut eof = false;
+
+    while Instant::now() < deadline {
+        if let Ok(out) = pty.read(false) {
+            collected.push_str(&out.to_string_lossy());
+        }
+        if pty.is_eof().unwrap() {
+            eof = true;
+            break;
+        }
+    }
+
+    assert!(eof, "is_eof() never reported EOF");
+
+    let cleaned = common::strip_ansi(&collected);
+    let seen = cleaned.matches('E').count();
+    let last = format!("L{:06}E", LINES - 1);
+
+    eprintln!(
+        "MEASURE bulk drain: {} bytes collected, {} line markers, last line present: {}",
+        collected.len(),
+        seen,
+        cleaned.contains(&last)
+    );
+
+    assert!(
+        cleaned.contains(&last),
+        "the last line the child wrote before exiting ({last}) never arrived, \
+         so the drain was cut short: {} bytes collected, {seen} markers seen",
+        collected.len()
+    );
+}
+
 /// A spaced `appname` must resolve to the executable asked for, not to
 /// whatever `CreateProcessW`'s ambiguity search stumbles on first.
 ///
@@ -531,5 +748,300 @@ fn spawn_spaced_appname_ignores_bogus_candidate_conpty() {
         common::parse_argv(&collected),
         vec![real.to_string_lossy().into_owned()],
         "the wrong executable ran, or none did. Raw output: {collected:?}"
+    );
+}
+
+/// Measurement, not an assertion - run with `--ignored --nocapture`.
+///
+/// `is_eof` is now an atomic load plus a channel emptiness check, where it
+/// used to issue `PeekNamedPipe` and a process-state query on every call. This
+/// reports the per-call cost in both states, and the cost of the loop shape
+/// consumers actually write: a blocking read interleaved with an EOF check.
+#[test]
+#[ignore]
+fn bench_eof_polling_conpty() {
+    use std::time::Instant;
+
+    const ITERS: usize = 1_000_000;
+    const LINES: usize = 200_000;
+
+    let pty_args = PTYArgs {
+        cols: 200,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    // --- per-call cost while the child is alive (the state a polling
+    // --- consumer spends all its time in) ---
+    {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(
+            OsString::from(r"C:\Windows\System32\cmd.exe"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let started = Instant::now();
+        let mut eofs = 0usize;
+        for _ in 0..ITERS {
+            if pty.is_eof().unwrap() {
+                eofs += 1;
+            }
+        }
+        let elapsed = started.elapsed();
+        eprintln!(
+            "MICRO is_eof (child alive): {ITERS} calls in {elapsed:?} = {:.1} ns/call ({eofs} true)",
+            elapsed.as_nanos() as f64 / ITERS as f64
+        );
+    }
+
+    // --- per-call cost after EOF ---
+    let Some(dir) = common::spaced_dir("conpty bench") else {
+        eprintln!("could not create a scratch directory; skipping the rest");
+        return;
+    };
+    let Some(writer) = common::build_bulk_writer(&dir) else {
+        eprintln!("rustc not available; skipping the rest");
+        return;
+    };
+
+    {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(
+            writer.clone().into_os_string(),
+            Some(OsString::from("50")),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            let _ = pty.read(false);
+            if pty.is_eof().unwrap() {
+                break;
+            }
+        }
+
+        let started = Instant::now();
+        let mut eofs = 0usize;
+        for _ in 0..ITERS {
+            if pty.is_eof().unwrap() {
+                eofs += 1;
+            }
+        }
+        let elapsed = started.elapsed();
+        eprintln!(
+            "MICRO is_eof (after EOF):   {ITERS} calls in {elapsed:?} = {:.1} ns/call ({eofs} true)",
+            elapsed.as_nanos() as f64 / ITERS as f64
+        );
+    }
+
+    // --- the real consumer loop: blocking read interleaved with is_eof ---
+    {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(
+            writer.into_os_string(),
+            Some(OsString::from(LINES.to_string())),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let started = Instant::now();
+        let mut iterations = 0usize;
+        let mut bytes = 0usize;
+        let deadline = Instant::now() + Duration::from_secs(120);
+
+        // An empty read means the loop went round without the blocking read
+        // having anything to hand over - i.e. a spin. A healthy loop should
+        // have almost none.
+        let mut empty_reads = 0usize;
+
+        while !pty.is_eof().unwrap() {
+            iterations += 1;
+            match pty.read(true) {
+                Ok(out) => {
+                    let n = out.to_string_lossy().len();
+                    if n == 0 {
+                        empty_reads += 1;
+                    }
+                    bytes += n;
+                }
+                Err(_) => break,
+            }
+            assert!(Instant::now() < deadline, "loop did not terminate");
+        }
+
+        let elapsed = started.elapsed();
+        eprintln!(
+            "MACRO read(true)+is_eof: {bytes} bytes over {iterations} iterations in {elapsed:?} \
+             ({:.1} MB/s, {:.1} us/iteration, {empty_reads} empty reads = {:.2}% spin)",
+            bytes as f64 / 1e6 / elapsed.as_secs_f64(),
+            elapsed.as_micros() as f64 / iterations as f64,
+            100.0 * empty_reads as f64 / iterations as f64
+        );
+    }
+}
+
+/// No process may outlive the PTY: not the child, not its grandchild, and not
+/// the console host the pseudoconsole brought up.
+///
+/// The child is `cmd /c ping`, which lives long enough to be observed and
+/// starts a grandchild of its own, then exits on its own account. Everything
+/// that appeared while it ran has to be gone once the child has exited and the
+/// PTY has been dropped.
+#[test]
+fn no_leftover_processes_after_child_exit_conpty() {
+    use std::time::Instant;
+
+    let before = common::running_pids();
+
+    let pty_args = PTYArgs {
+        cols: 120,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut created = std::collections::BTreeMap::new();
+
+    {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(
+            OsString::from(r"C:\Windows\System32\cmd.exe"),
+            Some(OsString::from("/c ping -n 3 127.0.0.1")),
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Accumulate over several samples: the host and the child do not
+        // necessarily appear in the same instant.
+        let watch_until = Instant::now() + Duration::from_millis(1500);
+        while Instant::now() < watch_until {
+            let _ = pty.read(false);
+            created.extend(common::pty_processes_created(&before, &common::running_pids()));
+            sleep(Duration::from_millis(100));
+        }
+
+        assert!(
+            !created.is_empty(),
+            "no new process was observed at all, so this test would pass vacuously"
+        );
+
+        // Let the child finish on its own.
+        let exit_deadline = Instant::now() + Duration::from_secs(30);
+        while pty.is_alive().unwrap() {
+            let _ = pty.read(false);
+            assert!(Instant::now() < exit_deadline, "child never exited");
+            sleep(Duration::from_millis(50));
+        }
+
+        // Drain to EOF so teardown takes its normal course.
+        let eof_deadline = Instant::now() + Duration::from_secs(10);
+        while !pty.is_eof().unwrap() && Instant::now() < eof_deadline {
+            let _ = pty.read(false);
+            sleep(Duration::from_millis(20));
+        }
+    }
+
+    // The PTY is now dropped. Give teardown a bounded moment, then require
+    // that every process it created is gone. A PID is only counted as a
+    // leftover if it is still present *and* still running the same image, so
+    // that PID reuse cannot fail the test spuriously.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut leftover: Vec<(u32, String)>;
+
+    loop {
+        let now_running = common::running_pids();
+        leftover = created
+            .iter()
+            .filter(|(pid, image)| now_running.get(pid) == Some(*image))
+            .map(|(pid, image)| (*pid, image.clone()))
+            .collect();
+
+        if leftover.is_empty() || Instant::now() >= deadline {
+            break;
+        }
+        sleep(Duration::from_millis(100));
+    }
+
+    eprintln!(
+        "LEAKCHECK conpty: {} process(es) created: {:?}",
+        created.len(),
+        created.values().collect::<Vec<_>>()
+    );
+
+    assert!(
+        leftover.is_empty(),
+        "process(es) left behind after the child exited and the PTY was dropped: {leftover:?}"
+    );
+}
+
+/// Dropping the PTY while the child is still running must not orphan anything
+/// either.
+///
+/// The child here would run for ~30 s if left alone, so anything still present
+/// afterwards is a genuine leak rather than a timing artefact. Releasing the
+/// pseudoconsole tears down the whole console session, which is why the child
+/// and its grandchild go with it.
+#[test]
+fn no_leftover_processes_when_dropped_while_child_alive_conpty() {
+    use std::time::Instant;
+
+    let before = common::running_pids();
+    let pty_args = PTYArgs {
+        cols: 120, rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut created = std::collections::BTreeMap::new();
+    {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(
+            OsString::from(r"C:\Windows\System32\cmd.exe"),
+            Some(OsString::from("/c ping -n 30 127.0.0.1")),
+            None, None,
+        ).unwrap();
+
+        let watch_until = Instant::now() + Duration::from_millis(1500);
+        while Instant::now() < watch_until {
+            let _ = pty.read(false);
+            created.extend(common::pty_processes_created(&before, &common::running_pids()));
+            sleep(Duration::from_millis(100));
+        }
+        assert!(pty.is_alive().unwrap(), "child should still be running");
+        assert!(
+            !created.is_empty(),
+            "no new process was observed at all, so this test would pass vacuously"
+        );
+        eprintln!(
+            "LEAKCHECK conpty (dropped while alive): {:?}",
+            created.values().collect::<Vec<_>>()
+        );
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut leftover: Vec<(u32, String)>;
+    loop {
+        let now = common::running_pids();
+        leftover = created.iter()
+            .filter(|(pid, image)| now.get(pid) == Some(*image))
+            .map(|(pid, image)| (*pid, image.clone()))
+            .collect();
+        if leftover.is_empty() || Instant::now() >= deadline { break; }
+        sleep(Duration::from_millis(200));
+    }
+    assert!(
+        leftover.is_empty(),
+        "process(es) left behind after dropping the PTY while the child was          still running: {leftover:?}"
     );
 }

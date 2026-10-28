@@ -1,8 +1,8 @@
 use windows::core::{Error, HRESULT, PCSTR};
 /// Base struct used to generalize some of the PTY I/O operations.
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_IO_PENDING, HANDLE, STATUS_PENDING, S_OK, WAIT_FAILED, WAIT_OBJECT_0,
-    WAIT_TIMEOUT,
+    CloseHandle, ERROR_IO_PENDING, HANDLE, STATUS_CANCELLED, STATUS_END_OF_FILE, STATUS_PENDING,
+    STATUS_PIPE_BROKEN, STATUS_PIPE_CLOSING, S_OK, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Globalization::{
     MultiByteToWideChar, WideCharToMultiByte, CP_UTF8, MULTI_BYTE_TO_WIDE_CHAR_FLAGS,
@@ -20,23 +20,40 @@ use core::ffi::c_void;
 use std::ffi::OsString;
 use std::mem::MaybeUninit;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// How long teardown will wait for the reader thread to signal that it has
-/// exited before giving up and continuing anyway.
+/// How long teardown will wait, *after* cancelling the pending read, for the
+/// reader thread to signal that it has exited before giving up and continuing
+/// anyway.
 ///
-/// The reader signals only once its pending `ReadFile` returns, and that
-/// relies on ConPTY closing the output pipe when the child exits. That is an
-/// assumption about an external component whose behaviour we do not control -
-/// a ConPTY update that changes it must not be able to deadlock us.
+/// The reader signals only once its `ReadFile` returns. `CancelIoEx` should
+/// make that happen immediately, but it is a request to a component whose
+/// behaviour we do not control, so a cancel that does not land must not be
+/// able to deadlock us.
 const READER_EXIT_BUDGET: Duration = Duration::from_millis(2_000);
 
 /// Poll granularity while waiting for `reader_exit_event`.
 const READER_EXIT_POLL_MS: u32 = 50;
+
+/// How long the reader may go without delivering anything, once the child has
+/// exited, before teardown concludes the stream is quiet and cancels the
+/// pending read.
+///
+/// This used to be a flat 5 s wait for `reader_exit_event`. On ConPTY that
+/// event never arrives on its own, so *every* teardown paid the full 5 s -
+/// measured at 5.100 s against 0.059 s for the WinPTY backend. Waiting on
+/// progress instead of on the clock keeps the common case short while still
+/// letting a long drain finish: each delivery resets the idle timer, so a
+/// reader with trailing output to hand over is never cut off mid-drain.
+const READER_DRAIN_IDLE_GRACE: Duration = Duration::from_millis(150);
+
+/// Absolute cap on the drain wait, so a stream that somehow never goes quiet
+/// cannot withhold the cleanup signal indefinitely.
+const READER_DRAIN_CAP: Duration = Duration::from_millis(10_000);
 
 
 #[cfg(windows)]
@@ -184,6 +201,55 @@ pub trait PTYImpl: Sync + Send {
     fn cancel_io(&self) -> Result<bool, OsString>;
 }
 
+/// Render a `HRESULT` as text for a caller.
+///
+/// `HRESULT::message()` yields an empty string whenever no message table can
+/// resolve the code: `FormatMessageW` fails and the empty result is returned
+/// as-is. An error with nothing in it tells a caller nothing - it is what made
+/// andfoy/pywinpty#565 so hard to read - so fall back to the numeric code,
+/// which at least identifies the failure.
+fn error_text(result: HRESULT) -> OsString {
+    let message = result.message();
+    if message.is_empty() {
+        OsString::from(format!("Unknown error (HRESULT 0x{:08X})", result.0 as u32))
+    } else {
+        OsString::from(message)
+    }
+}
+
+/// Build the `lpCommandLine` prefix that supplies the child's `argv[0]`.
+///
+/// Both backends pass the executable at the head of `lpCommandLine`, because
+/// Win32 derives `argv[0]` from there even when `lpApplicationName` is also
+/// given - per the `CreateProcessW` docs, "because argv[0] is the module name,
+/// C programmers generally repeat the module name as the first token in the
+/// command line".
+///
+/// That token has to be quoted, because an unquoted one ends at the first
+/// space. The two backends were broken by that in different ways, both covered
+/// by the `spawn_spaced_appname_*` tests:
+///
+/// * WinPTY also passes `appname` as `lpApplicationName`, so the right file ran
+///   but `argv` was mangled: `C:\Program Files\Python\python.exe` arrived as
+///   `argv[0] = "C:\Program"`, with `Files\Python\python.exe` inserted ahead of
+///   the caller's real arguments.
+/// * ConPTY passes `lpApplicationName` as NULL, which left `argv[0]` intact but
+///   handed resolution to `CreateProcessW`'s ambiguity search - it walks the
+///   path one space at a time, trying `C:\Program.exe` before
+///   `C:\Program Files\...`. Anything sitting at a shorter candidate wins, and
+///   if it is not a valid image the spawn fails outright with a bad-image error
+///   whose `%1` placeholder is never substituted. That is
+///   andfoy/pywinpty#583, which the reporter had correlated with path *length*;
+///   what actually decides it is whether such a candidate exists.
+///
+/// Quoting fixes both: `argv[0]` stays in one piece, and the search is skipped
+/// so the path is taken literally.
+///
+/// For `argv[0]` a leading quote simply runs to the next quote with no escape
+/// processing, and `"` is not a legal path character on Windows, so wrapping is
+/// both sufficient and lossless. Callers could not do this themselves:
+/// `lpApplicationName` has to stay bare, and `CreateProcessW` rejects a quoted
+/// path there with `ERROR_INVALID_NAME`.
 pub(crate) fn quoted_argv0(appname: &OsString) -> Vec<u16> {
     const QUOTE: u16 = b'"' as u16;
     const SPACE: u16 = b' ' as u16;
@@ -203,6 +269,48 @@ pub(crate) fn quoted_argv0(appname: &OsString) -> Vec<u16> {
     quoted.extend_from_slice(&wide);
     quoted.push(QUOTE);
     quoted
+}
+
+/// Outcome of an overlapped read, derived from the `NTSTATUS` the kernel
+/// writes into `OVERLAPPED.Internal` on completion.
+enum ReadStatus {
+    /// The read completed; `InternalHigh` holds the byte count.
+    Completed,
+    /// Nothing more will ever arrive on this stream.
+    Eof,
+    /// A genuine failure, mapped to a `HRESULT` that has a message.
+    Failed(HRESULT),
+}
+
+/// Classify the completion status of an overlapped read.
+fn classify_read_status(internal: usize) -> ReadStatus {
+    let status = internal as i32;
+
+    // `STATUS_CANCELLED` is our own `CancelIoEx` during teardown, which only
+    // runs once the child has exited - so an aborted read is the end of the
+    // stream, not a failure. Reporting it as one is what surfaced to pywinpty
+    // as `WinptyError('')` on the ConPTY backend (andfoy/pywinpty#565): the
+    // raw `NTSTATUS` was cast straight to `HRESULT`, where no message table
+    // could resolve it, so the error arrived with an empty message.
+    //
+    // The pipe statuses are the ordinary end of a stream: the write end went
+    // away.
+    if status == STATUS_CANCELLED.0
+        || status == STATUS_PIPE_BROKEN.0
+        || status == STATUS_PIPE_CLOSING.0
+        || status == STATUS_END_OF_FILE.0
+    {
+        return ReadStatus::Eof;
+    }
+
+    // `HRESULT::from_nt` sets the NT facility bit, which is what makes
+    // `message()` resolve the text out of `ntdll.dll`.
+    let result = HRESULT::from_nt(status);
+    if result.is_err() {
+        ReadStatus::Failed(result)
+    } else {
+        ReadStatus::Completed
+    }
 }
 
 fn read(
@@ -227,9 +335,7 @@ fn read(
                 };
 
                 if result.is_err() {
-                    let result_msg = result.message();
-                    let string = OsString::from(result_msg);
-                    return Err(string);
+                    return Err(error_text(result));
                 }
             }
         } else {
@@ -244,9 +350,7 @@ fn read(
                 };
 
                 if result.is_err() {
-                    let result_msg = result.message();
-                    let string = OsString::from(result_msg);
-                    return Err(string);
+                    return Err(error_text(result));
                 }
                 size.assume_init();
             }
@@ -283,34 +387,28 @@ fn read(
         };
 
         if result.is_err() {
-            let result_msg = result.message();
-            let string = OsString::from(result_msg);
-            return Err(string);
+            return Err(error_text(result));
         }
 
         if let Some(overlapped) = lp_overlapped {
-            result = if awaiting_io {
-                // awaiting_io = false;
-                if (*overlapped).Internal == STATUS_PENDING.0 as usize {
-                    if WaitForSingleObjectEx((*overlapped).hEvent, INFINITE, false) != WAIT_OBJECT_0
-                    {
-                        Error::from_thread().into()
-                    } else {
-                        *chars_read_ptr = (*overlapped).InternalHigh as u32;
-                        HRESULT((*overlapped).Internal as i32)
-                    }
-                } else {
-                    *chars_read_ptr = (*overlapped).InternalHigh as u32;
-                    HRESULT((*overlapped).Internal as i32)
+            if awaiting_io {
+                if (*overlapped).Internal == STATUS_PENDING.0 as usize
+                    && WaitForSingleObjectEx((*overlapped).hEvent, INFINITE, false)
+                        != WAIT_OBJECT_0
+                {
+                    return Err(error_text(Error::from_thread().into()));
                 }
-            } else {
-                S_OK
-            };
 
-            if result.is_err() {
-                let result_msg = result.message();
-                let string = OsString::from(result_msg);
-                return Err(string);
+                *chars_read_ptr = (*overlapped).InternalHigh as u32;
+
+                match classify_read_status((*overlapped).Internal) {
+                    ReadStatus::Completed => {}
+                    // `false` tells the reader loop to stop: this is EOF, and
+                    // reporting it as an error is what left consumers unable
+                    // to tell a closed stream from a broken one.
+                    ReadStatus::Eof => return Ok((OsString::new(), false)),
+                    ReadStatus::Failed(err) => return Err(error_text(err)),
+                }
             }
 
             let read_bytes = chars_read.assume_init();
@@ -358,9 +456,7 @@ fn is_alive(process: HANDLE) -> Result<bool, OsString> {
             Ok(alive)
         } else {
             let err: HRESULT = Error::from_thread().into();
-            let result_msg = err.message();
-            let string = OsString::from(result_msg);
-            Err(string)
+            Err(error_text(err))
         }
     }
 }
@@ -374,9 +470,7 @@ fn wait_for_exit(process: HANDLE) -> Result<bool, OsString> {
             Ok(dead)
         } else {
             let err: HRESULT = Error::from_thread().into();
-            let result_msg = err.message();
-            let string = OsString::from(result_msg);
-            Err(string)
+            Err(error_text(err))
         }
     }
 }
@@ -399,9 +493,7 @@ fn get_exitstatus(process: HANDLE) -> Result<Option<u32>, OsString> {
             Ok(exitstatus)
         } else {
             let err: HRESULT = Error::from_thread().into();
-            let result_msg = err.message();
-            let string = OsString::from(result_msg);
-            Err(string)
+            Err(error_text(err))
         }
     }
 }
@@ -447,10 +539,12 @@ pub struct PTYProcess {
     alive_thread: Option<thread::JoinHandle<()>>,
     /// Channel used to keep the thread alive.
     reader_alive: Sender<bool>,
-    /// Atomic variable to signal when a thread finishes
-    reader_atomic: Arc<AtomicBool>,
+    /// `true` while the reader thread is running, cleared just before it
+    /// exits. Nothing can be queued once it is `false`, which is what makes
+    /// it the basis of `is_eof`.
+    reader_running: Arc<AtomicBool>,
     /// Manual-reset event signaled by the reader thread on exit; lets teardown wait
-    /// event-driven instead of busy-looping on `reader_atomic`.
+    /// event-driven instead of busy-looping on `reader_running`.
     reader_exit_event: LocalHandle,
     /// Channel used to send the process handle to the reading thread.
     reader_process_out: Sender<Option<LocalHandle>>,
@@ -544,7 +638,7 @@ unsafe fn drain_overlapped(
             return Ok(transferred);
         }
         let err: HRESULT = Error::from_thread().into();
-        return Err(OsString::from(err.message()));
+        return Err(error_text(err));
     }
 
     // Timed out (or the wait itself failed). Cancel so the kernel stops
@@ -647,7 +741,7 @@ impl PTYProcess {
                 reading_thread: Some(reader_thread),
                 alive_thread: None,
                 reader_alive: reader_alive_tx,
-                reader_atomic: thread_arc,
+                reader_running: thread_arc,
                 reader_exit_event,
                 reader_process_out: reader_process_tx,
                 reader_ready: reader_arc,
@@ -676,6 +770,12 @@ impl PTYProcess {
             let (reader_process_2_tx, reader_process_2_rx) = unbounded::<LocalHandle>();
             let reader_exit_for_thread = reader_exit_event;
             let reader_exit_for_alive = reader_exit_event;
+            // Bumped once per delivery so teardown can tell "the reader is
+            // still draining" from "the reader is stuck on a read that will
+            // never complete". See `READER_DRAIN_IDLE_GRACE`.
+            let reader_progress = Arc::new(AtomicUsize::new(0));
+            let reader_progress_for_thread = Arc::clone(&reader_progress);
+            let reader_progress_for_alive = Arc::clone(&reader_progress);
 
             let reader_thread = thread::spawn(move || {
                 let mut read_overlapped = OVERLAPPED::default();
@@ -694,10 +794,12 @@ impl PTYProcess {
                         match read(true, conout.into(), using_pipes, Some(&mut read_overlapped)) {
                             Ok((result, alive_status)) => {
                                 reader_out_tx.send(Some(Ok(result))).unwrap();
+                                reader_progress_for_thread.fetch_add(1, Ordering::Release);
                                 alive = alive_status;
                             }
                             Err(err) => {
                                 reader_out_tx.send(Some(Err(err))).unwrap();
+                                reader_progress_for_thread.fetch_add(1, Ordering::Release);
                                 alive = false;
                             }
                         }
@@ -731,11 +833,46 @@ impl PTYProcess {
                         // Child has exited. Let modern ConPTY auto-close the output
                         // pipe — reader's pending ReadFile then returns 0 bytes
                         // (natural EOF) and the reader exits, signaling
-                        // `reader_exit_event`. If that doesn't happen in time
-                        // (older ConPTY / non-ConPTY consumer), fall back to
-                        // CancelIoEx to unstick the reader.
+                        // `reader_exit_event`. If that doesn't happen (older
+                        // ConPTY / non-ConPTY consumer), fall back to CancelIoEx
+                        // to unstick the reader.
+                        //
+                        // Wait on the reader's progress rather than on a fixed
+                        // deadline: give up only once it has gone quiet for
+                        // `READER_DRAIN_IDLE_GRACE`, so trailing output still
+                        // gets handed over in full, however long that takes,
+                        // while a reader that is simply stuck costs ~150 ms
+                        // instead of the flat 5 s this used to pay on every
+                        // ConPTY teardown.
                         let exit_handle = Into::<HANDLE>::into(reader_exit_for_alive);
-                        if WaitForSingleObject(exit_handle, 5000) != WAIT_OBJECT_0 {
+                        let mut reader_exited = false;
+                        let mut last_progress =
+                            reader_progress_for_alive.load(Ordering::Acquire);
+                        let mut idle_since = Instant::now();
+                        let drain_deadline = Instant::now() + READER_DRAIN_CAP;
+
+                        loop {
+                            if WaitForSingleObject(exit_handle, READER_EXIT_POLL_MS)
+                                == WAIT_OBJECT_0
+                            {
+                                reader_exited = true;
+                                break;
+                            }
+
+                            let progress = reader_progress_for_alive.load(Ordering::Acquire);
+                            if progress != last_progress {
+                                last_progress = progress;
+                                idle_since = Instant::now();
+                            } else if idle_since.elapsed() >= READER_DRAIN_IDLE_GRACE {
+                                break;
+                            }
+
+                            if Instant::now() >= drain_deadline {
+                                break;
+                            }
+                        }
+
+                        if !reader_exited {
                             let _ = CancelIoEx(Into::<HANDLE>::into(conout), None);
                             // Bounded. This used to spin forever if the
                             // reader never signalled, which wedges this
@@ -779,7 +916,7 @@ impl PTYProcess {
                 reading_thread: Some(reader_thread),
                 alive_thread: Some(alive_thread),
                 reader_alive: reader_alive_tx,
-                reader_atomic: thread_arc,
+                reader_running: thread_arc,
                 reader_exit_event,
                 reader_process_out: reader_process_tx,
                 reader_ready: reader_arc,
@@ -892,9 +1029,7 @@ impl PTYProcess {
                         Error::from_thread().into()
                     };
                     if write_result.is_err() {
-                        let result_msg = write_result.message();
-                        let string = OsString::from(result_msg);
-                        return Err(string);
+                        return Err(error_text(write_result));
                     }
                     total_written += bytes_written.assume_init();
                 }
@@ -992,48 +1127,48 @@ impl PTYProcess {
                         Err(msg) => Err(msg),
                     }
                 }
-                Err(err) => Err(OsString::from(err.message())),
+                Err(err) => Err(error_text(err.into())),
             }
         }
     }
 
     /// Check if a process reached End-of-File (EOF).
     ///
+    /// EOF means nothing further can ever be read: the reader thread has
+    /// finished, and everything it handed over has already been consumed.
+    ///
     /// # Returns
-    /// `true` if the process reached EOL, false otherwise. If an error occurs, then a [`OsString`]
+    /// `true` if the process reached EOF, false otherwise. If an error occurs, then a [`OsString`]
     /// containing a human-readable error is raised.
     pub fn is_eof(&self) -> Result<bool, OsString> {
-        // let mut available_bytes: Box<u32> = Box::new_uninit();
-        // let bytes_ptr: *mut u32 = &mut *available_bytes;
-        // let bytes_ptr: *mut u32 = ptr::null_mut();
-        let mut bytes = MaybeUninit::<u32>::uninit();
-        unsafe {
-            let bytes_ptr: *mut u32 = ptr::addr_of_mut!(*bytes.as_mut_ptr());
-            let bytes_ref = Some(bytes_ptr);
-            let mut succ = PeekNamedPipe(
-                Into::<HANDLE>::into(self.conout),
-                None,
-                0,
-                bytes_ref,
-                None,
-                None,
-            )
-            .is_ok();
-
-            let _total_bytes = bytes.assume_init();
-
-            let is_alive = match self.is_alive() {
-                Ok(alive) => {
-                    alive || !self.reader_out_rx.is_empty()
-                },
-                Err(err) => {
-                    return Err(err);
-                }
-            };
-
-            succ = succ || is_alive || self.reader_atomic.load(Ordering::Acquire);
-            Ok(!succ)
-        }
+        // This used to compute
+        //
+        //     succ = PeekNamedPipe(..).is_ok() || is_alive || reader_atomic;
+        //     Ok(!succ)
+        //
+        // which could never be `true`. `PeekNamedPipe` succeeds for as long as
+        // the handle is valid - which it is for the whole life of the PTY - so
+        // `succ` was always set on the first term alone, and the reader's
+        // "still running" flag held for the whole session too, because nothing
+        // stopped the reader before teardown. The byte count the peek asked
+        // for was read into a discarded local, and was passed as `lpBytesRead`
+        // rather than `lpTotalBytesAvail`, so with a zero-sized buffer it
+        // could only ever have come back 0 anyway. See andfoy/pywinpty#423,
+        // #519 and #565.
+        //
+        // The reader thread is the authority here, not the pipe. Once it has
+        // stopped, nothing more can ever be queued; and bytes still sitting
+        // unread in the pipe are unreachable, because there is no longer
+        // anything to drain them. Asking the pipe instead kept `is_eof` false
+        // forever on ConPTY, where conhost's trailing output outlives the
+        // reader.
+        //
+        // Both reader implementations maintain the flag the same way: the
+        // synchronous one stops as soon as `is_eof(process, conout)` holds,
+        // the asynchronous one when its read completes empty or is cancelled
+        // once the child has exited.
+        let reader_running = self.reader_running.load(Ordering::Acquire);
+        Ok(!reader_running && self.reader_out_rx.is_empty())
     }
 
     /// Retrieve the exit status of the process
@@ -1104,10 +1239,7 @@ impl PTYProcess {
             if CancelIoEx(Into::<HANDLE>::into(self.conout), None).is_ok() {
                 Ok(true)
             } else {
-                let result: HRESULT = Error::from_thread().into();
-                let result_msg = result.message();
-                let string = OsString::from(result_msg);
-                Err(string)
+                Err(error_text(Error::from_thread().into()))
             }
         }
     }
