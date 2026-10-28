@@ -217,40 +217,86 @@ fn get_output_path() -> PathBuf {
     path
 }
 
-fn get_dll_target_arch(dll_path: PathBuf) -> PEMachineType {
-    let file = File::open(dll_path).unwrap();
+/// Read the machine type out of a PE image's COFF header.
+///
+/// Returns `None` for anything that is not a readable Portable Executable,
+/// including a file that simply is not there. This used to `unwrap` its way
+/// through the parse, so a layout that had `winpty-agent.exe` without a
+/// `winpty.dll` beside it aborted the build script instead of reporting that
+/// winpty was unusable (see #38).
+fn get_dll_target_arch(dll_path: &Path) -> Option<PEMachineType> {
+    let file = File::open(dll_path).ok()?;
     let mut buf_reader = BufReader::new(file);
-    buf_reader.seek(Start(0x3C)).unwrap();
+    buf_reader.seek(Start(0x3C)).ok()?;
 
     let mut off_buf: [u8; 4] = [0; 4];
-    buf_reader.read_exact(&mut off_buf).unwrap();
+    buf_reader.read_exact(&mut off_buf).ok()?;
 
     let pe_off = u32::from_ne_bytes(off_buf);
-    let displ = pe_off - 0x40;
-    buf_reader.seek_relative(displ.into()).unwrap();
+    // A PE offset below the DOS stub cannot be valid, and the subtraction
+    // below would underflow and panic.
+    let displ = pe_off.checked_sub(0x40)?;
+    buf_reader.seek_relative(displ.into()).ok()?;
 
     let mut pe_buf: [u8; 6] = [0; 6];
-    buf_reader.read_exact(&mut pe_buf).unwrap();
+    buf_reader.read_exact(&mut pe_buf).ok()?;
 
-    assert_eq!(&pe_buf[0..2], b"PE", "File is not a Portable Executable");
+    if &pe_buf[0..2] != b"PE" {
+        println!(
+            "cargo:warning={} is not a Portable Executable",
+            dll_path.display()
+        );
+        return None;
+    }
 
-    let machine_type_bytes: [u8; 2] = pe_buf[4..6].try_into().unwrap();
+    let machine_type_bytes: [u8; 2] = pe_buf[4..6].try_into().ok()?;
     let machine_type: u16 = u16::from_ne_bytes(machine_type_bytes);
     println!("DLL compilation target: {:#X}", machine_type);
 
-    PEMachineType::from_u16(machine_type).unwrap()
+    PEMachineType::from_u16(machine_type)
 }
 
-fn check_dll_arch_validity(dll_path: PathBuf, cur_arch: &str) -> bool {
-    let target_arch = get_dll_target_arch(dll_path);
-
-    match target_arch {
-        PEMachineType::AMD64 => cur_arch == "x64",
-        PEMachineType::ARM64 => cur_arch == "arm64",
-        PEMachineType::ARM64EC => cur_arch == "x64",
-        PEMachineType::ARM64X => cur_arch == "x64" || cur_arch == "arm64",
+fn check_dll_arch_validity(dll_path: &Path, cur_arch: &str) -> bool {
+    match get_dll_target_arch(dll_path) {
+        Some(PEMachineType::AMD64) => cur_arch == "x64",
+        Some(PEMachineType::ARM64) => cur_arch == "arm64",
+        Some(PEMachineType::ARM64EC) => cur_arch == "x64",
+        Some(PEMachineType::ARM64X) => cur_arch == "x64" || cur_arch == "arm64",
         _ => false
     }
+}
+
+/// Directories that may hold winpty's import library, in search order.
+///
+/// `LIB` is included because that is what the MSVC linker actually searches -
+/// it ignores `PATH` entirely - so an install whose `winpty.lib` is only
+/// reachable through `LIB` still links.
+fn winpty_lib_search_dirs(winpty_bin: &Path, winpty_root: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![
+        winpty_root.join("lib"),
+        winpty_bin.to_path_buf(),
+        winpty_root.to_path_buf(),
+    ];
+
+    if let Some(lib_env) = env::var_os("LIB") {
+        dirs.extend(env::split_paths(&lib_env));
+    }
+
+    dirs
+}
+
+/// Locate `winpty.lib`, returning the directory holding it.
+///
+/// Finding `winpty-agent.exe` on `PATH` does **not** mean winpty can be linked
+/// against. Several programs ship the agent - and `winpty.dll` with it, since
+/// both are needed at run time - without the import library, because they
+/// redistribute winpty rather than provide an SDK. Neovim is the example in
+/// #38. Linking is what actually has to succeed, so require the one file it
+/// needs before claiming winpty is available.
+fn find_winpty_import_lib(dirs: &[PathBuf]) -> Option<PathBuf> {
+    dirs.iter()
+        .find(|dir| dir.join("winpty.lib").is_file())
+        .cloned()
 }
 
 fn main() {
@@ -452,45 +498,82 @@ fn main() {
             }
         }
 
-        // Check if winpty is installed
+        // Check if winpty is installed.
+        //
+        // Presence is established by finding `winpty-agent.exe` *and* the
+        // import library the linker will need. See `find_winpty_import_lib`.
+        println!("cargo:rerun-if-env-changed=LIB");
+
         let mut cmd = Command::new("winpty-agent");
-        let mut winpty_enabled = "0";
+        let mut winpty_enabled = false;
+        let mut why_not: Option<String> = None;
+
         if command_ok(cmd.arg("--version")) {
             let winpty_version = command_output(cmd.arg("--version"));
             println!("Using Winpty version: {}", winpty_version);
 
+            // `command_ok` succeeded, so the agent resolved on PATH.
             let winpty_location = which("winpty-agent").unwrap();
             let winpty_path = winpty_location.parent().unwrap();
             let winpty_root = winpty_path.parent().unwrap();
             // let winpty_include = winpty_root.join("include");
 
-            let winpty_lib = winpty_root.join("lib");
             let winpty_dll_path = winpty_path.join("winpty.dll");
+            let valid_arch = check_dll_arch_validity(&winpty_dll_path, simplified_arch);
+            let lib_dir =
+                find_winpty_import_lib(&winpty_lib_search_dirs(winpty_path, winpty_root));
 
-            let valid_arch = check_dll_arch_validity(winpty_dll_path, simplified_arch);
-
-            winpty_enabled = match valid_arch {
-                true => "1",
-                false => "0"
-            };
-
-            if valid_arch {
-                println!(
-                    "cargo:rustc-link-search=native={}",
-                    winpty_lib.to_str().unwrap()
-                );
-                println!(
-                    "cargo:rustc-link-search=native={}",
-                    winpty_path.to_str().unwrap()
-                );
-                println!("cargo:rustc-cfg=feature=\"winpty\"");
+            match (valid_arch, lib_dir) {
+                (true, Some(lib_dir)) => {
+                    println!(
+                        "cargo:rustc-link-search=native={}",
+                        lib_dir.to_str().unwrap()
+                    );
+                    println!(
+                        "cargo:rustc-link-search=native={}",
+                        winpty_path.to_str().unwrap()
+                    );
+                    println!("cargo:rustc-cfg=feature=\"winpty\"");
+                    winpty_enabled = true;
+                }
+                (false, _) => {
+                    why_not = Some(format!(
+                        "found winpty-agent at {} but {} is missing or built for \
+                         another architecture than {}",
+                        winpty_location.display(),
+                        winpty_dll_path.display(),
+                        simplified_arch
+                    ));
+                }
+                (true, None) => {
+                    why_not = Some(format!(
+                        "found winpty-agent at {} but no winpty.lib to link against. \
+                         Programs that redistribute winpty ship the agent and the DLL \
+                         without the import library; install winpty's development \
+                         files, or point LIB at the directory holding winpty.lib",
+                        winpty_location.display()
+                    ));
+                }
             }
 
             // CFG.exported_header_dirs.push(&winpty_include);
+        } else {
+            why_not = Some("winpty-agent was not found on PATH".to_string());
         }
 
-        if winpty_enabled == "1" {
+        if winpty_enabled {
             println!("cargo:rustc-link-lib=dylib=winpty");
+        } else if let Some(reason) = why_not {
+            // Say so up front. Asking for the feature and silently getting a
+            // build without it - or a wall of `LNK2019: unresolved external
+            // symbol winpty_*` - is what made this hard to diagnose.
+            if env::var_os("CARGO_FEATURE_WINPTY").is_some() {
+                panic!(
+                    "the `winpty` feature was requested, but winpty cannot be linked: \
+                     {reason}"
+                );
+            }
+            println!("cargo:warning=winpty backend disabled: {reason}");
         }
     }
 }
