@@ -1010,3 +1010,65 @@ fn no_leftover_processes_when_dropped_while_child_alive_conpty() {
         "process(es) left behind after dropping the PTY while the child was          still running: {leftover:?}"
     );
 }
+
+/// Reading and writing from different threads at the same time (#89).
+///
+/// `PTY` is `Send + Sync` and both `read` and `write` take `&self`, so it can
+/// be shared through an `Arc`: writes are serialised by an internal mutex, and
+/// reads are served from the reader thread's queue rather than touching the
+/// pipe directly.
+#[test]
+fn concurrent_read_and_write_conpty() {
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<PTY>();
+
+    const MARKER: &str = "CONCURRENT_OK";
+
+    let pty_args = PTYArgs {
+        cols: 120, rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    // `spawn` needs `&mut self`, so share only afterwards.
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+    pty.spawn(OsString::from(r"C:\Windows\System32\cmd.exe"), None, None, None).unwrap();
+    let pty = Arc::new(pty);
+
+    let writer = {
+        let pty = Arc::clone(&pty);
+        std::thread::spawn(move || {
+            // Write while the main thread is inside its read loop.
+            sleep(Duration::from_millis(400));
+            pty.write(OsString::from(format!("echo {MARKER}\r\n"))).unwrap();
+        })
+    };
+
+    let mut collected = String::new();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    // Two occurrences: cmd echoes the typed line, then prints the result. One
+    // alone would only prove the echo came back.
+    while Instant::now() < deadline && collected.matches(MARKER).count() < 2 {
+        match pty.read(false) {
+            Ok(chunk) => {
+                if chunk.is_empty() {
+                    sleep(Duration::from_millis(10));
+                }
+                collected.push_str(&chunk.to_string_lossy());
+            }
+            Err(err) => panic!("read failed: {:?}", err.to_string_lossy()),
+        }
+    }
+
+    writer.join().expect("writer thread");
+
+    eprintln!("PROBE occurrences: {}", collected.matches(MARKER).count());
+    assert!(
+        collected.matches(MARKER).count() >= 2,
+        "expected the echoed command and its output. Got: {collected:?}"
+    );
+}
