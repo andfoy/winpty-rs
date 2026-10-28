@@ -17,6 +17,7 @@ use std::os::windows::ffi::OsStrExt;
 
 use super::bindings::*;
 use crate::pty::{PTYProcess, PTYImpl};
+use crate::pty::base::quoted_argv0;
 use crate::pty::PTYArgs;
 
 struct WinPTYPtr {
@@ -235,7 +236,7 @@ impl PTYImpl for WinPTY {
 
         let mut env_buf: Vec<u16>;
         let mut cwd_buf: Vec<u16>;
-        let mut cmd_buf: Vec<u16>;
+        let cmd_buf: Vec<u16>;
 
         let mut app_oss = OsString::new();
         app_oss.clone_from(&appname);
@@ -271,13 +272,15 @@ impl PTYImpl for WinPTY {
             // means. pywinpty already assumes the ConPTY meaning - it passes
             // `list2cmdline(argv[1:])` - so this makes that work on WinPTY
             // rather than changing what callers must supply.
-            let mut full_cmdline = OsString::new();
-            full_cmdline.clone_from(&appname);
-            full_cmdline.push(" ");
-            full_cmdline.push(&cmdline_opt);
+            // `quoted_argv0` keeps a spaced `appname` in one piece here. Only
+            // this copy is quoted; `app_oss_buf` - which becomes
+            // `lpApplicationName` - stays bare.
+            let mut full_cmdline: Vec<u16> = quoted_argv0(&appname);
+            full_cmdline.push(0x0020);
+            full_cmdline.extend(cmdline_opt.encode_wide());
+            full_cmdline.push(0);
 
-            cmd_buf = full_cmdline.encode_wide().collect();
-            cmd_buf.push(0);
+            cmd_buf = full_cmdline;
             cmd = cmd_buf.as_ptr();
         }
 

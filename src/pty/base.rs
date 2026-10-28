@@ -184,6 +184,27 @@ pub trait PTYImpl: Sync + Send {
     fn cancel_io(&self) -> Result<bool, OsString>;
 }
 
+pub(crate) fn quoted_argv0(appname: &OsString) -> Vec<u16> {
+    const QUOTE: u16 = b'"' as u16;
+    const SPACE: u16 = b' ' as u16;
+    const TAB: u16 = b'\t' as u16;
+
+    let wide: Vec<u16> = appname.encode_wide().collect();
+
+    // Nothing to do when there is no whitespace to split on, or when the
+    // caller already quoted the value and would otherwise end up with two
+    // layers of quotes.
+    if wide.first() == Some(&QUOTE) || !wide.iter().any(|c| *c == SPACE || *c == TAB) {
+        return wide;
+    }
+
+    let mut quoted = Vec::with_capacity(wide.len() + 2);
+    quoted.push(QUOTE);
+    quoted.extend_from_slice(&wide);
+    quoted.push(QUOTE);
+    quoted
+}
+
 fn read(
     blocking: bool,
     stream: HANDLE,
