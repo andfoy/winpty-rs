@@ -27,7 +27,9 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::System::WindowsProgramming::RtlInitUnicodeString;
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
-use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, SetForegroundWindow, ShowWindow, SW_HIDE,
+};
 use super::win_bindings::Windows::Wdk::Storage::FileSystem::NtCreateNamedPipeFile;
 // use windows_strings::PWSTR;
 
@@ -92,9 +94,33 @@ impl PTYImpl for ConPTY {
 
         unsafe {
             // Create a console window in case ConPTY is running in a GUI application.
+            //
+            // The console can only be hidden *after* it exists: `AllocConsole`
+            // gives this process a visible console window, and the hide is a
+            // separate call. So for a GUI application the window genuinely
+            // exists for that moment, which is what surfaced as a taskbar
+            // flash and the host application losing focus (#82, reported from
+            // Sublime Text via randy3k/Terminus#441). Only the first call was
+            // affected, since afterwards the process already has a console and
+            // `AllocConsole` fails.
+            //
+            // Note which window had the foreground beforehand so it can be
+            // handed back. `SetForegroundWindow` is normally refused to a
+            // process that is not already in the foreground, which is exactly
+            // what the allocation has just made this one - so the restore is
+            // permitted here even though it would not be in general.
+            let prev_foreground = GetForegroundWindow();
             let console_allocated = AllocConsole().is_ok();
             if console_allocated {
-                ShowWindow(GetConsoleWindow(), SW_HIDE).unwrap();
+                // `ShowWindow` reports whether the window was *previously*
+                // visible, not whether the call succeeded, so a zero return is
+                // not an error to unwrap on - it used to panic a library
+                // caller if the console was already hidden.
+                let _ = ShowWindow(GetConsoleWindow(), SW_HIDE);
+
+                if !prev_foreground.is_invalid() {
+                    let _ = SetForegroundWindow(prev_foreground);
+                }
             }
 
             // Recreate the standard stream inputs in case the parent process
