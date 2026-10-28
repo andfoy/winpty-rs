@@ -274,3 +274,14 @@ pub fn last_size(pattern: &Regex, text: &str) -> Option<(i32, i32)> {
         Some((caps.get(1)?.as_str().parse().ok()?, caps.get(2)?.as_str().parse().ok()?))
     })
 }
+
+/// Pull the last single-capture number out of `text`.
+///
+/// The last one, because a buffer may hold several probes and only the most
+/// recent reflects the current state.
+pub fn last_number(pattern: &Regex, text: &str) -> Option<i32> {
+    pattern
+        .captures_iter(text)
+        .last()
+        .and_then(|caps| caps.get(1)?.as_str().parse().ok())
+}
