@@ -2,6 +2,8 @@
 
 use std::ffi::OsString;
 use std::env;
+use std::thread::sleep;
+use std::time::Duration;
 use regex::Regex;
 
 use winptyrs::{PTY, PTYArgs, PTYBackend, MouseMode, AgentConfig};
@@ -92,8 +94,6 @@ fn read_write_winpty() {
 
 #[test]
 fn set_size_winpty() {
-    use std::time::Duration;
-
     // Each wait is bounded and accumulating; see `common::read_until_into`.
     const BUDGET: Duration = Duration::from_secs(60);
     const MAX_PROBES: usize = 20;
