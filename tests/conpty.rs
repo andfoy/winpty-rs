@@ -8,6 +8,8 @@ use regex::Regex;
 
 use winptyrs::{PTY, PTYArgs, PTYBackend, MouseMode, AgentConfig};
 
+mod common;
+
 #[test]
 #[ignore]
 fn spawn_conpty() {
@@ -404,5 +406,130 @@ fn spawn_cmdline_is_arguments_only_conpty() {
     assert!(
         collected.contains(MARKER),
         "python did not run the -c code. Got: {collected:?}"
+    );
+}
+
+/// A spaced `appname` must not corrupt the child's `argv` on ConPTY either.
+///
+/// Regression test for andfoy/pywinpty#583. This backend passes `lpApplicationName` as NULL,
+/// so the concatenated command line is both the only thing naming the
+/// executable and the source of `argv[0]`. Unquoted, a path with a space was
+/// split exactly as on WinPTY - and here it also left `CreateProcessW` free to
+/// walk its ambiguity search, which would prefer a `C:\Program.exe` over
+/// `C:\Program Files\...`.
+///
+/// Both argument shapes are covered, because this backend concatenates
+/// `appname` whether or not a `cmdline` was supplied: with no arguments at all
+/// the child still saw a truncated `argv[0]`.
+#[test]
+fn spawn_spaced_appname_keeps_argv_conpty() {
+    use std::time::Instant;
+
+    let Some(dir) = common::spaced_dir("conpty argv") else {
+        eprintln!("could not create a directory whose path contains a space; skipping");
+        return;
+    };
+    let Some(dumper) = common::build_argv_dumper(&dir) else {
+        eprintln!("rustc not available to build the argv probe; skipping");
+        return;
+    };
+
+    let pty_args = PTYArgs {
+        cols: 200,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let cases: [(Option<OsString>, Vec<String>); 2] = [
+        (
+            Some(OsString::from(r#"--alpha "two words" beta"#)),
+            vec![
+                dumper.to_string_lossy().into_owned(),
+                "--alpha".to_string(),
+                "two words".to_string(),
+                "beta".to_string(),
+            ],
+        ),
+        (None, vec![dumper.to_string_lossy().into_owned()]),
+    ];
+
+    for (cmdline, expected) in cases {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+        pty.spawn(dumper.clone().into_os_string(), cmdline.clone(), None, None)
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut collected = String::new();
+        while Instant::now() < deadline && common::parse_argv(&collected).len() < expected.len() {
+            if let Ok(out) = pty.read(false) {
+                collected.push_str(&out.to_string_lossy());
+            }
+            sleep(Duration::from_millis(50));
+        }
+
+        assert_eq!(
+            common::parse_argv(&collected),
+            expected,
+            "spaced executable path was split across argv entries (cmdline: {cmdline:?}). \
+             Raw output: {collected:?}"
+        );
+    }
+}
+
+/// A spaced `appname` must resolve to the executable asked for, not to
+/// whatever `CreateProcessW`'s ambiguity search stumbles on first.
+///
+/// Regression test for andfoy/pywinpty#583, where spawning an executable from
+/// a path containing a space failed with `ERROR_BAD_EXE_FORMAT` - surfacing in
+/// pywinpty as `WinptyError: %1 is not a valid Win32 application`, with the
+/// placeholder unsubstituted. The reporter correlated it with path length;
+/// what actually matters is whether one of the search's shorter candidates
+/// happens to exist, which `plant_bogus_candidate` arranges deterministically.
+///
+/// Quoting the `argv[0]` token removes the search altogether, so the path is
+/// taken literally.
+#[test]
+fn spawn_spaced_appname_ignores_bogus_candidate_conpty() {
+    use std::time::Instant;
+
+    let Some((real, decoy)) = common::plant_bogus_candidate("winptyrs583") else {
+        eprintln!("could not stage the ambiguity-search reproduction; skipping");
+        return;
+    };
+
+    let pty_args = PTYArgs {
+        cols: 200,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::ConPTY).unwrap();
+    let spawned = pty.spawn(real.clone().into_os_string(), None, None, None);
+
+    assert!(
+        spawned.is_ok(),
+        "spawn failed for a path containing a space, with {} planted ahead of it \
+         in CreateProcessW's search order: {:?}",
+        decoy.display(),
+        spawned.err()
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut collected = String::new();
+    while Instant::now() < deadline && common::parse_argv(&collected).is_empty() {
+        if let Ok(out) = pty.read(false) {
+            collected.push_str(&out.to_string_lossy());
+        }
+        sleep(Duration::from_millis(50));
+    }
+
+    assert_eq!(
+        common::parse_argv(&collected),
+        vec![real.to_string_lossy().into_owned()],
+        "the wrong executable ran, or none did. Raw output: {collected:?}"
     );
 }

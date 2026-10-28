@@ -42,6 +42,7 @@ use std::{mem, ptr, thread};
 use super::calls::{ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, ShowHidePseudoConsole};
 use crate::pty::PTYArgs;
 use crate::pty::{PTYImpl, PTYProcess};
+use crate::pty::base::quoted_argv0;
 
 /// Struct that contains the required information to spawn a console
 /// using the Windows API `CreatePseudoConsole` call.
@@ -450,9 +451,14 @@ impl PTYImpl for ConPTY {
         let mut cwd_buf: Vec<u16>;
         let cmd_buf: Vec<u16>;
 
-        let mut cmdline_oss = OsString::new();
-        cmdline_oss.clone_from(&appname);
-        let mut cmdline_oss_buf: Vec<u16> = cmdline_oss.encode_wide().collect();
+        // `lpApplicationName` is NULL on this backend, so this buffer is the
+        // only thing naming the executable. Unquoted, a spaced path is left to
+        // `CreateProcessW`'s ambiguity search, which tries each
+        // space-delimited prefix in turn and runs - or fails on - whatever it
+        // finds first; `quoted_argv0` keeps the path in one piece so it is
+        // taken literally. This applies with no `cmdline` at all, since the
+        // path is concatenated either way.
+        let mut cmdline_oss_buf: Vec<u16> = quoted_argv0(&appname);
 
         if let Some(env_opt) = env {
             env_buf = env_opt.encode_wide().collect();

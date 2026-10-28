@@ -6,6 +6,8 @@ use regex::Regex;
 
 use winptyrs::{PTY, PTYArgs, PTYBackend, MouseMode, AgentConfig};
 
+mod common;
+
 #[test]
 fn spawn_winpty() {
     let pty_args = PTYArgs {
@@ -314,5 +316,69 @@ fn spawn_cmdline_is_arguments_only_winpty() {
     assert!(
         collected.contains(MARKER),
         "python did not run the -c code. Got: {collected:?}"
+    );
+}
+
+/// A spaced `appname` must not corrupt the child's `argv`.
+///
+/// Regression test for andfoy/pywinpty#583, the defect #132's fix introduced. Because Win32
+/// takes `argv[0]` from `lpCommandLine` even when `lpApplicationName` is
+/// given, that fix prepends `appname` to `cmdline` - but it prepended it
+/// unquoted, so a path with a space was split: the child saw
+/// `argv[0] = "C:\Program"` and gained a bogus `"Files\..."` argument ahead of
+/// its real ones.
+///
+/// Callers had no way around it. Quoting `appname` themselves makes
+/// `CreateProcessW` reject `lpApplicationName` with `ERROR_INVALID_NAME`.
+#[test]
+fn spawn_spaced_appname_keeps_argv_winpty() {
+    use std::time::{Duration, Instant};
+
+    let Some(dir) = common::spaced_dir("winpty argv") else {
+        eprintln!("could not create a directory whose path contains a space; skipping");
+        return;
+    };
+    let Some(dumper) = common::build_argv_dumper(&dir) else {
+        eprintln!("rustc not available to build the argv probe; skipping");
+        return;
+    };
+
+    let pty_args = PTYArgs {
+        cols: 200,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+    pty.spawn(
+        dumper.clone().into_os_string(),
+        Some(OsString::from(r#"--alpha "two words" beta"#)),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut collected = String::new();
+    while Instant::now() < deadline && common::parse_argv(&collected).len() < 4 {
+        if let Ok(out) = pty.read(false) {
+            collected.push_str(&out.to_string_lossy());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let argv = common::parse_argv(&collected);
+    let expected = vec![
+        dumper.to_string_lossy().into_owned(),
+        "--alpha".to_string(),
+        "two words".to_string(),
+        "beta".to_string(),
+    ];
+
+    assert_eq!(
+        argv, expected,
+        "the spaced executable path was split across argv entries. Raw output: {collected:?}"
     );
 }
