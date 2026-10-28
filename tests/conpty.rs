@@ -129,43 +129,46 @@ fn set_size_conpty() {
 
     pty.write(OsString::from("\x1b[?1;0c\x1b[0;0R")).unwrap();
 
-    let header_regex = Regex::new(r".*Width.*").unwrap();
-    let num_regex = Regex::new(r".*\s+-*\s*-*\s+(\d+)\s+(\d+).*").unwrap();
-    let probe = "powershell -command \"&{(get-host).ui.rawui.WindowSize;}\"\r\n";
+    // `mode con` rather than `powershell -command "&{(get-host).ui.rawui
+    // .WindowSize;}"`. Starting PowerShell inside cmd inside a pseudoconsole
+    // is a lot of machinery to ask a simple question, and on CI it was the
+    // part that failed: the prompt, the echoed command and the window title
+    // changing to name PowerShell all arrived, and then nothing for 60 s.
+    // `mode con` reports the pseudoconsole's own size, and reports it
+    // immediately.
+    //
+    // It is used only here. On the WinPTY backend `mode con` gives the screen
+    // *buffer* height (3000) rather than the window height, so that test still
+    // asks PowerShell.
+    let probe = "mode con\r\n";
+    let rows_regex = Regex::new(r"Lines:\s+(\d+)").unwrap();
+    let cols_regex = Regex::new(r"Columns:\s+(\d+)").unwrap();
 
-    // Ask for the window size, then wait for the table header and its numbers.
-    pty.write(probe.into()).unwrap();
-    let mut collected = String::new();
-    common::read_until_into(&pty, &mut collected, &header_regex, BUDGET).unwrap();
-    common::read_until_into(&pty, &mut collected, &num_regex, BUDGET).unwrap();
+    // `Columns` is printed last, so matching it means the table is complete.
+    let probe_size = |pty: &PTY| -> (i32, i32) {
+        pty.write(probe.into()).unwrap();
+        let mut collected = String::new();
+        common::read_until_into(pty, &mut collected, &cols_regex, BUDGET).unwrap();
+        (
+            common::last_number(&cols_regex, &collected).expect("columns"),
+            common::last_number(&rows_regex, &collected).expect("lines"),
+        )
+    };
 
-    let (mut cols, mut rows) =
-        common::last_size(&num_regex, &collected).expect("a window size");
+    let (mut cols, mut rows) = probe_size(&pty);
 
     assert_eq!(rows, pty_args.rows);
     assert_eq!(cols, pty_args.cols);
 
     pty.set_size(90, 30).unwrap();
 
-    for _ in 0..4 {
-        pty.write("cls\r\n".into()).unwrap();
-    }
-
-    // The resize takes a moment to show up, so probe until it does - each
-    // probe into a fresh buffer, so the size read back is the current one.
     let mut probes = 0;
-    while probes < 5 || (cols != 90 && rows != 30) {
+    while cols != 90 || rows != 30 {
         assert!(
             probes < MAX_PROBES,
             "window size still {cols}x{rows} after {probes} probes, expected 90x30"
         );
-
-        pty.write(probe.into()).unwrap();
-        let mut collected = String::new();
-        common::read_until_into(&pty, &mut collected, &header_regex, BUDGET).unwrap();
-        common::read_until_into(&pty, &mut collected, &num_regex, BUDGET).unwrap();
-
-        (cols, rows) = common::last_size(&num_regex, &collected).expect("a window size");
+        (cols, rows) = probe_size(&pty);
         probes += 1;
     }
 
