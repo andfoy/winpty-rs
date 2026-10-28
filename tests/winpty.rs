@@ -382,3 +382,223 @@ fn spawn_spaced_appname_keeps_argv_winpty() {
         "the spaced executable path was split across argv entries. Raw output: {collected:?}"
     );
 }
+
+/// `is_eof` has to report EOF on this backend too.
+///
+/// Companion to `is_eof_after_child_exits_conpty`. The two readers reach the
+/// same flag by different routes - this one stops as soon as its own
+/// `is_eof(process, conout)` check holds, rather than on a cancelled
+/// overlapped read - so both are worth covering. See andfoy/pywinpty#423,
+/// #519 and #565.
+#[test]
+fn is_eof_after_child_exits_winpty() {
+    use std::time::{Duration, Instant};
+
+    const MARKER: &str = "WINPTYRS_EOF_OK";
+
+    let pty_args = PTYArgs {
+        cols: 120,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+    pty.spawn(
+        OsString::from(r"C:\Windows\System32\cmd.exe"),
+        Some(OsString::from(format!("/c echo {MARKER}"))),
+        None,
+        None,
+    )
+    .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut collected = String::new();
+    let mut eof = false;
+
+    while Instant::now() < deadline {
+        match pty.read(false) {
+            Ok(out) => collected.push_str(&out.to_string_lossy()),
+            Err(err) => assert!(
+                !err.is_empty(),
+                "a read failed with an empty message, so callers cannot tell \
+                 a closed stream from a broken one"
+            ),
+        }
+
+        if pty.is_eof().unwrap() {
+            eof = true;
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    assert!(
+        collected.contains(MARKER),
+        "the child's output never arrived. Got: {collected:?}"
+    );
+    assert!(
+        eof,
+        "is_eof() never reported EOF although the child exited. Got: {collected:?}"
+    );
+}
+
+/// No process may outlive the PTY: not the child, not its grandchild, and not
+/// the console host the pseudoconsole brought up.
+///
+/// The child is `cmd /c ping`, which lives long enough to be observed and
+/// starts a grandchild of its own, then exits on its own account. Everything
+/// that appeared while it ran has to be gone once the child has exited and the
+/// PTY has been dropped.
+#[test]
+fn no_leftover_processes_after_child_exit_winpty() {
+    use std::time::{Duration, Instant};
+
+    let before = common::running_pids();
+
+    let pty_args = PTYArgs {
+        cols: 120,
+        rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut created = std::collections::BTreeMap::new();
+
+    {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+        pty.spawn(
+            OsString::from(r"C:\Windows\System32\cmd.exe"),
+            Some(OsString::from("/c ping -n 3 127.0.0.1")),
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Accumulate over several samples: the host and the child do not
+        // necessarily appear in the same instant.
+        let watch_until = Instant::now() + Duration::from_millis(1500);
+        while Instant::now() < watch_until {
+            let _ = pty.read(false);
+            created.extend(common::pty_processes_created(&before, &common::running_pids()));
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        assert!(
+            !created.is_empty(),
+            "no new process was observed at all, so this test would pass vacuously"
+        );
+
+        // Let the child finish on its own.
+        let exit_deadline = Instant::now() + Duration::from_secs(30);
+        while pty.is_alive().unwrap() {
+            let _ = pty.read(false);
+            assert!(Instant::now() < exit_deadline, "child never exited");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        // Drain to EOF so teardown takes its normal course.
+        let eof_deadline = Instant::now() + Duration::from_secs(10);
+        while !pty.is_eof().unwrap() && Instant::now() < eof_deadline {
+            let _ = pty.read(false);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    // The PTY is now dropped. Give teardown a bounded moment, then require
+    // that every process it created is gone. A PID is only counted as a
+    // leftover if it is still present *and* still running the same image, so
+    // that PID reuse cannot fail the test spuriously.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut leftover: Vec<(u32, String)>;
+
+    loop {
+        let now_running = common::running_pids();
+        leftover = created
+            .iter()
+            .filter(|(pid, image)| now_running.get(pid) == Some(*image))
+            .map(|(pid, image)| (*pid, image.clone()))
+            .collect();
+
+        if leftover.is_empty() || Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    eprintln!(
+        "LEAKCHECK winpty: {} process(es) created: {:?}",
+        created.len(),
+        created.values().collect::<Vec<_>>()
+    );
+
+    assert!(
+        leftover.is_empty(),
+        "process(es) left behind after the child exited and the PTY was dropped: {leftover:?}"
+    );
+}
+
+/// Dropping the PTY while the child is still running must not orphan anything
+/// either.
+///
+/// The child here would run for ~30 s if left alone, so anything still present
+/// afterwards is a genuine leak rather than a timing artefact. Releasing the
+/// pseudoconsole tears down the whole console session, which is why the child
+/// and its grandchild go with it.
+#[test]
+fn no_leftover_processes_when_dropped_while_child_alive_winpty() {
+    use std::time::{Duration, Instant};
+
+    let before = common::running_pids();
+    let pty_args = PTYArgs {
+        cols: 120, rows: 25,
+        mouse_mode: MouseMode::WINPTY_MOUSE_MODE_NONE,
+        timeout: 10000,
+        agent_config: AgentConfig::WINPTY_FLAG_COLOR_ESCAPES,
+    };
+
+    let mut created = std::collections::BTreeMap::new();
+    {
+        let mut pty = PTY::new_with_backend(&pty_args, PTYBackend::WinPTY).unwrap();
+        pty.spawn(
+            OsString::from(r"C:\Windows\System32\cmd.exe"),
+            Some(OsString::from("/c ping -n 30 127.0.0.1")),
+            None, None,
+        ).unwrap();
+
+        let watch_until = Instant::now() + Duration::from_millis(1500);
+        while Instant::now() < watch_until {
+            let _ = pty.read(false);
+            created.extend(common::pty_processes_created(&before, &common::running_pids()));
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(pty.is_alive().unwrap(), "child should still be running");
+        assert!(
+            !created.is_empty(),
+            "no new process was observed at all, so this test would pass vacuously"
+        );
+        eprintln!(
+            "LEAKCHECK winpty (dropped while alive): {:?}",
+            created.values().collect::<Vec<_>>()
+        );
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut leftover: Vec<(u32, String)>;
+    loop {
+        let now = common::running_pids();
+        leftover = created.iter()
+            .filter(|(pid, image)| now.get(pid) == Some(*image))
+            .map(|(pid, image)| (*pid, image.clone()))
+            .collect();
+        if leftover.is_empty() || Instant::now() >= deadline { break; }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert!(
+        leftover.is_empty(),
+        "process(es) left behind after dropping the PTY while the child was          still running: {leftover:?}"
+    );
+}
