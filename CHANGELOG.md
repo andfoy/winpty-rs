@@ -1,3 +1,85 @@
+## Version 1.0.8 (2026/10/28)
+
+This release makes EOF detection work, and that is a **behavioural change** on
+both backends. `PTY::is_eof` previously could never return `true`, so code
+written around it will behave differently. A loop of this shape
+
+```rust
+while output.is_empty() && !pty.is_eof()? {
+    // ...
+}
+```
+
+- stop when there is nothing to read *and* we are not at EOF - used to
+terminate on its first empty read and will now run forever; the condition
+wants inverting to `&& pty.is_eof()?`. This crate is normally depended upon
+through a caret requirement, so 1.0.8 is picked up automatically by anything
+asking for 1.0.x - it is worth grepping for that shape before upgrading.
+
+Spawning an executable whose path contains a space is also fixed. It broke
+differently on each backend: WinPTY ran the right file but mangled `argv`,
+while ConPTY left `argv[0]` intact and instead let `CreateProcessW` guess
+which file to run, which could fail the spawn outright with a bad-image error
+whose `%1` placeholder was never substituted.
+
+Teardown no longer waits out a fixed 5 s before releasing the reader - a
+blocking read after the child exits now returns in about 175 ms rather than
+5.1 s - and it no longer cancels I/O that has stopped belonging to it, which
+could abort a read owned by the embedding application.
+
+### Issues Closed
+
+* [Issue 89](https://github.com/andfoy/winpty-rs/issues/89) - Is there any way to read & write concurrently?
+* [Issue 82](https://github.com/andfoy/winpty-rs/issues/82) - Shouldn't you call `CreateProcessW` with `SW_HIDE` set? ([PR 147](https://github.com/andfoy/winpty-rs/pull/147) by [@andfoy](https://github.com/andfoy))
+* [Issue 49](https://github.com/andfoy/winpty-rs/issues/49) - `winpty-rs` unexpectedly replaces current process IO ([PR 137](https://github.com/andfoy/winpty-rs/pull/137) by [@andfoy](https://github.com/andfoy))
+* [Issue 38](https://github.com/andfoy/winpty-rs/issues/38) - Detect winpty presence more reliably ([PR 145](https://github.com/andfoy/winpty-rs/pull/145) by [@andfoy](https://github.com/andfoy))
+* [Issue 31](https://github.com/andfoy/winpty-rs/issues/31) - Async read?
+* [Issue 20](https://github.com/andfoy/winpty-rs/issues/20) - debug example fail ([PR 145](https://github.com/andfoy/winpty-rs/pull/145) by [@andfoy](https://github.com/andfoy))
+
+In this release 6 issues were closed.
+
+### Pull Requests Merged
+
+* [PR 149](https://github.com/andfoy/winpty-rs/pull/149) - Stop teardown cancelling I/O that is no longer ours, by [@andfoy](https://github.com/andfoy)
+* [PR 148](https://github.com/andfoy/winpty-rs/pull/148) - Ask `mode con` for the ConPTY window size, not PowerShell, by [@andfoy](https://github.com/andfoy)
+* [PR 147](https://github.com/andfoy/winpty-rs/pull/147) - Hand the foreground back after allocating the console, by [@andfoy](https://github.com/andfoy) ([82](https://github.com/andfoy/winpty-rs/issues/82))
+* [PR 146](https://github.com/andfoy/winpty-rs/pull/146) - Stop the size tests hot-spinning, and match accumulated output, by [@andfoy](https://github.com/andfoy)
+* [PR 145](https://github.com/andfoy/winpty-rs/pull/145) - Detect winpty by its import library, not by the agent on PATH, by [@andfoy](https://github.com/andfoy) ([38](https://github.com/andfoy/winpty-rs/issues/38), [20](https://github.com/andfoy/winpty-rs/issues/20))
+* [PR 144](https://github.com/andfoy/winpty-rs/pull/144) - Make EOF detection work, and stop teardown costing 5 s, by [@andfoy](https://github.com/andfoy)
+* [PR 143](https://github.com/andfoy/winpty-rs/pull/143) - Quote the argv[0] token so spaced executable paths work, by [@andfoy](https://github.com/andfoy)
+
+In this release 7 pull requests were closed.
+
+### Notes for packagers
+
+* `PTY::is_eof` now reports EOF rather than always returning `false`. See the
+  note above: a loop written `while ... && !pty.is_eof()?` terminated before
+  and will now hang. Nothing in the public API changed, so Cargo will not
+  gate the upgrade.
+* winpty is now detected by its **import library** rather than by
+  `winpty-agent.exe` on `PATH`. Programs that redistribute winpty ship the
+  agent and the DLL without `winpty.lib`, and that used to enable the backend
+  and then fail at link time with 15 unresolved `winpty_*` symbols. The
+  search covers `<root>/lib`, the agent's own directory and the entries of
+  `LIB` - which is what the MSVC linker reads, since it ignores `PATH`. A
+  build that cannot link winpty now says so, and asking for the `winpty`
+  feature explicitly when it cannot be linked is a build-script error naming
+  the cause rather than a wall of linker output.
+* Errors no longer arrive empty. An `NTSTATUS` was being cast straight into an
+  `HRESULT`, which no message table could resolve; unresolvable codes now
+  report their numeric value instead of an empty string.
+* Dropping a PTY while its child is still running terminates the child and
+  any grandchildren on both backends, along with the console host -
+  `OpenConsole.exe` for ConPTY, `winpty-agent.exe` and a `conhost.exe` for
+  WinPTY. The stray-child caveat noted in 1.0.7 no longer reproduces and is
+  now covered by tests.
+* `alive_thread` still shares the child process handle and its reader-exit
+  event with `drop`, which closes them. Losing that race yields a wait on the
+  wrong handle rather than the cancelled I/O fixed in this release, so it is
+  left for a follow-up along with reference-counted ownership of these
+  handles.
+
+
 ## Version 1.0.7 (2026/10/27)
 
 This release fixes a teardown deadlock that affects **every build made
